@@ -1,0 +1,22 @@
+# Dependencies
+/vendor/bundle/
+/.bundle/
+Gemfile.lock
+
+# Build
+*.gem
+pkg/
+
+# Test
+coverage/
+.rspec_status
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
