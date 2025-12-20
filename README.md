@@ -75,7 +75,7 @@ Sendly.send_message(to: "+15551234567", text: "Hello!")
 ```ruby
 client = Sendly::Client.new(
   "sk_live_v1_xxx",
-  base_url: "https://api.sendly.live/v1",
+  base_url: "https://sendly.live/api/v1",
   timeout: 60,
   max_retries: 5
 )
