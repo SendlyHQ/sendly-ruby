@@ -13,21 +13,24 @@ module Sendly
     # @param url [String] HTTPS endpoint URL
     # @param events [Array<String>] Event types to subscribe to
     # @param description [String, nil] Optional description
+    # @param mode [String, nil] Event mode filter: "all", "test", or "live" (live requires verification)
     # @param metadata [Hash, nil] Custom metadata
     # @return [Sendly::WebhookCreatedResponse]
     #
     # @example
     #   webhook = client.webhooks.create(
     #     url: "https://example.com/webhooks",
-    #     events: ["message.delivered", "message.failed"]
+    #     events: ["message.delivered", "message.failed"],
+    #     mode: "all"
     #   )
     #   puts "Secret: #{webhook.secret}"  # Save this - only shown once!
-    def create(url:, events:, description: nil, metadata: nil)
+    def create(url:, events:, description: nil, mode: nil, metadata: nil)
       raise ArgumentError, "Webhook URL must be HTTPS" unless url&.start_with?("https://")
       raise ArgumentError, "At least one event type is required" if events.nil? || events.empty?
 
       body = { url: url, events: events }
       body[:description] = description if description
+      body[:mode] = mode if mode
       body[:metadata] = metadata if metadata
 
       response = @client.post("/webhooks", body)
@@ -59,9 +62,10 @@ module Sendly
     # @param events [Array<String>, nil] New event subscriptions
     # @param description [String, nil] New description
     # @param is_active [Boolean, nil] Enable/disable webhook
+    # @param mode [String, nil] Event mode filter: "all", "test", or "live"
     # @param metadata [Hash, nil] Custom metadata
     # @return [Sendly::Webhook]
-    def update(webhook_id, url: nil, events: nil, description: nil, is_active: nil, metadata: nil)
+    def update(webhook_id, url: nil, events: nil, description: nil, is_active: nil, mode: nil, metadata: nil)
       validate_webhook_id!(webhook_id)
       raise ArgumentError, "Webhook URL must be HTTPS" if url && !url.start_with?("https://")
 
@@ -70,6 +74,7 @@ module Sendly
       body[:events] = events unless events.nil?
       body[:description] = description unless description.nil?
       body[:is_active] = is_active unless is_active.nil?
+      body[:mode] = mode unless mode.nil?
       body[:metadata] = metadata unless metadata.nil?
 
       response = @client.patch("/webhooks/#{webhook_id}", body)

@@ -194,7 +194,7 @@ module Sendly
 
   # Represents a configured webhook endpoint
   class Webhook
-    attr_reader :id, :url, :events, :description, :is_active, :failure_count,
+    attr_reader :id, :url, :events, :description, :mode, :is_active, :failure_count,
                 :last_failure_at, :circuit_state, :circuit_opened_at, :api_version,
                 :metadata, :created_at, :updated_at, :total_deliveries,
                 :successful_deliveries, :success_rate, :last_delivery_at
@@ -202,11 +202,15 @@ module Sendly
     # Circuit state constants
     CIRCUIT_STATES = %w[closed open half_open].freeze
 
+    # Webhook mode constants
+    MODES = %w[all test live].freeze
+
     def initialize(data)
       @id = data["id"]
       @url = data["url"]
       @events = data["events"] || []
       @description = data["description"]
+      @mode = data["mode"] || "all"
       # Handle both snake_case API response and camelCase
       @is_active = data["is_active"] || data["isActive"] || false
       @failure_count = data["failure_count"] || data["failureCount"] || 0
