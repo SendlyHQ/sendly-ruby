@@ -2,7 +2,7 @@
 
 Gem::Specification.new do |spec|
   spec.name          = "sendly"
-  spec.version       = "3.5.3"
+  spec.version       = "3.5.4"
   spec.authors       = ["Sendly"]
   spec.email         = ["support@sendly.live"]
 
