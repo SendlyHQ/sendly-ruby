@@ -1,0 +1,63 @@
+<svg width="838" height="306" viewBox="0 0 838 306" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0a0a"/>
+      <stop offset="100%" stop-color="#171717"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.6"/>
+      <stop offset="50%" stop-color="#f59e0b" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#f59e0b" stop-opacity="0.6"/>
+    </linearGradient>
+  </defs>
+  
+  <rect width="838" height="306" rx="12" fill="url(#bg-grad)"/>
+  <rect x="0.5" y="0.5" width="837" height="305" rx="11.5" stroke="url(#accent)" stroke-opacity="0.3"/>
+  
+  <g transform="translate(50, 100)">
+    <polygon points="40,2.7 72,18.7 72,58.7 40,77.3 8,58.7 8,18.7" fill="#0a0a0a" stroke="url(#accent)" stroke-width="1.5"/>
+    <text x="40" y="52" font-family="system-ui, -apple-system, sans-serif" font-size="40" font-weight="700" fill="#f59e0b" text-anchor="middle">S</text>
+  </g>
+  
+  <g transform="translate(140, 110)">
+    <rect width="70" height="70" rx="12" fill="#cc342d" opacity="0.9"/>
+    <text x="35" y="50" font-family="system-ui, -apple-system, sans-serif" font-size="20" font-weight="bold" fill="white" text-anchor="middle">Ruby</text>
+  </g>
+  
+  <text x="50" y="230" fill="white" font-family="system-ui, -apple-system, sans-serif" font-size="28" font-weight="600">Send SMS</text>
+  <text x="50" y="265" fill="#a1a1aa" font-family="system-ui, -apple-system, sans-serif" font-size="20">with Ruby</text>
+  
+  <rect x="360" y="24" width="454" height="258" rx="8" fill="#18181b" stroke="#27272a" stroke-width="1"/>
+  <rect x="360" y="24" width="454" height="36" rx="8" fill="#27272a"/>
+  <rect x="360" y="52" width="454" height="8" fill="#27272a"/>
+  <text x="390" y="48" fill="#f59e0b" font-family="ui-monospace, monospace" font-size="12" font-weight="500">Ruby</text>
+  <text x="435" y="48" fill="#71717a" font-family="ui-monospace, monospace" font-size="12">Python</text>
+  <text x="495" y="48" fill="#71717a" font-family="ui-monospace, monospace" font-size="12">Node.js</text>
+  <text x="560" y="48" fill="#71717a" font-family="ui-monospace, monospace" font-size="12">cURL</text>
+  
+  <text x="380" y="90" fill="#c084fc" font-family="ui-monospace, monospace" font-size="13">require</text>
+  <text x="440" y="90" fill="#fbbf24" font-family="ui-monospace, monospace" font-size="13">'sendly'</text>
+  
+  <text x="380" y="130" fill="#e4e4e7" font-family="ui-monospace, monospace" font-size="13">sendly =</text>
+  <text x="450" y="130" fill="#22d3ee" font-family="ui-monospace, monospace" font-size="13">Sendly</text>
+  <text x="505" y="130" fill="#e4e4e7" font-family="ui-monospace, monospace" font-size="13">::</text>
+  <text x="520" y="130" fill="#22d3ee" font-family="ui-monospace, monospace" font-size="13">Client</text>
+  <text x="565" y="130" fill="#e4e4e7" font-family="ui-monospace, monospace" font-size="13">.</text>
+  <text x="575" y="130" fill="#22d3ee" font-family="ui-monospace, monospace" font-size="13">new</text>
+  <text x="605" y="130" fill="#e4e4e7" font-family="ui-monospace, monospace" font-size="13">(</text>
+  <text x="615" y="130" fill="#fbbf24" font-family="ui-monospace, monospace" font-size="13">"sk_live_..."</text>
+  <text x="715" y="130" fill="#e4e4e7" font-family="ui-monospace, monospace" font-size="13">)</text>
+  
+  <text x="380" y="175" fill="#e4e4e7" font-family="ui-monospace, monospace" font-size="13">sendly.messages.</text>
+  <text x="510" y="175" fill="#22d3ee" font-family="ui-monospace, monospace" font-size="13">send</text>
+  <text x="545" y="175" fill="#e4e4e7" font-family="ui-monospace, monospace" font-size="13">(</text>
+  
+  <text x="400" y="210" fill="#f59e0b" font-family="ui-monospace, monospace" font-size="13">to:</text>
+  <text x="430" y="210" fill="#fbbf24" font-family="ui-monospace, monospace" font-size="13">"+15551234567"</text>
+  <text x="560" y="210" fill="#e4e4e7" font-family="ui-monospace, monospace" font-size="13">,</text>
+  
+  <text x="400" y="245" fill="#f59e0b" font-family="ui-monospace, monospace" font-size="13">text:</text>
+  <text x="445" y="245" fill="#fbbf24" font-family="ui-monospace, monospace" font-size="13">"Hello from Sendly!"</text>
+  
+  <text x="380" y="275" fill="#e4e4e7" font-family="ui-monospace, monospace" font-size="13">)</text>
+</svg>

@@ -1,3 +1,12 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/SendlyHQ/sendly-ruby/main/.github/header.svg" alt="Sendly Ruby SDK" />
+</p>
+
+<p align="center">
+  <a href="https://rubygems.org/gems/sendly"><img src="https://img.shields.io/gem/v/sendly.svg?style=flat-square" alt="RubyGems" /></a>
+  <a href="https://github.com/SendlyHQ/sendly-ruby/blob/main/LICENSE"><img src="https://img.shields.io/github/license/SendlyHQ/sendly-ruby?style=flat-square" alt="license" /></a>
+</p>
+
 # Sendly Ruby SDK
 
 Official Ruby SDK for the Sendly SMS API.
