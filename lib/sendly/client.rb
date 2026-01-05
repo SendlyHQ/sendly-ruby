@@ -59,6 +59,20 @@ module Sendly
       @account ||= AccountResource.new(self)
     end
 
+    # Access the Verify resource
+    #
+    # @return [Sendly::VerifyResource]
+    def verify
+      @verify ||= VerifyResource.new(self)
+    end
+
+    # Access the Templates resource
+    #
+    # @return [Sendly::TemplatesResource]
+    def templates
+      @templates ||= TemplatesResource.new(self)
+    end
+
     # Make a GET request
     #
     # @param path [String] API path

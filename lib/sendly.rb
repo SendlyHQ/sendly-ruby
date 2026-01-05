@@ -11,6 +11,8 @@ require_relative "sendly/messages"
 require_relative "sendly/webhooks"
 require_relative "sendly/webhooks_resource"
 require_relative "sendly/account_resource"
+require_relative "sendly/verify"
+require_relative "sendly/templates_resource"
 
 # Sendly Ruby SDK
 #
