@@ -86,9 +86,81 @@ module Sendly
     end
   end
 
-  class VerifyResource
+  class VerifySession
+    attr_reader :id, :url, :status, :success_url, :cancel_url, :brand_name,
+                :brand_color, :phone, :verification_id, :token, :metadata,
+                :expires_at, :created_at
+
+    def initialize(data)
+      @id = data["id"]
+      @url = data["url"]
+      @status = data["status"]
+      @success_url = data["success_url"]
+      @cancel_url = data["cancel_url"]
+      @brand_name = data["brand_name"]
+      @brand_color = data["brand_color"]
+      @phone = data["phone"]
+      @verification_id = data["verification_id"]
+      @token = data["token"]
+      @metadata = data["metadata"] || {}
+      @expires_at = data["expires_at"]
+      @created_at = data["created_at"]
+    end
+
+    def to_h
+      {
+        id: id, url: url, status: status, success_url: success_url,
+        cancel_url: cancel_url, brand_name: brand_name, brand_color: brand_color,
+        phone: phone, verification_id: verification_id, token: token,
+        metadata: metadata, expires_at: expires_at, created_at: created_at
+      }.compact
+    end
+  end
+
+  class ValidateSessionResponse
+    attr_reader :valid, :session_id, :phone, :verified_at, :metadata
+
+    def initialize(data)
+      @valid = data["valid"]
+      @session_id = data["session_id"]
+      @phone = data["phone"]
+      @verified_at = data["verified_at"]
+      @metadata = data["metadata"] || {}
+    end
+
+    def valid?
+      valid
+    end
+  end
+
+  class SessionsResource
     def initialize(client)
       @client = client
+    end
+
+    def create(success_url:, cancel_url: nil, brand_name: nil, brand_color: nil, metadata: nil)
+      body = { success_url: success_url }
+      body[:cancel_url] = cancel_url if cancel_url
+      body[:brand_name] = brand_name if brand_name
+      body[:brand_color] = brand_color if brand_color
+      body[:metadata] = metadata if metadata
+
+      response = @client.post("/verify/sessions", body)
+      VerifySession.new(response)
+    end
+
+    def validate(token:)
+      response = @client.post("/verify/sessions/validate", { token: token })
+      ValidateSessionResponse.new(response)
+    end
+  end
+
+  class VerifyResource
+    attr_reader :sessions
+
+    def initialize(client)
+      @client = client
+      @sessions = SessionsResource.new(client)
     end
 
     def send(phone:, channel: nil, code_length: nil, expires_in: nil, max_attempts: nil,
