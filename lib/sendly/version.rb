@@ -1,5 +1,5 @@
 # frozen_string_literal: true
 
 module Sendly
-  VERSION = "3.11.0"
+  VERSION = "3.12.1"
 end
