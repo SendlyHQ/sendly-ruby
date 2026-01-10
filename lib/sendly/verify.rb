@@ -165,7 +165,7 @@ module Sendly
 
     def send(phone:, channel: nil, code_length: nil, expires_in: nil, max_attempts: nil,
              template_id: nil, profile_id: nil, app_name: nil, locale: nil, metadata: nil)
-      body = { phone: phone }
+      body = { to: phone }
       body[:channel] = channel if channel
       body[:codeLength] = code_length if code_length
       body[:expiresIn] = expires_in if expires_in
