@@ -104,5 +104,12 @@ module Sendly
       response = @client.post("/verify/templates/#{id}/unpublish")
       Template.new(response)
     end
+
+    def clone(id, name: nil)
+      body = {}
+      body[:name] = name if name
+      response = @client.post("/templates/#{id}/clone", body)
+      Template.new(response)
+    end
   end
 end

@@ -73,6 +73,20 @@ module Sendly
       @templates ||= TemplatesResource.new(self)
     end
 
+    # Access the Campaigns resource
+    #
+    # @return [Sendly::CampaignsResource]
+    def campaigns
+      @campaigns ||= CampaignsResource.new(self)
+    end
+
+    # Access the Contacts resource
+    #
+    # @return [Sendly::ContactsResource]
+    def contacts
+      @contacts ||= ContactsResource.new(self)
+    end
+
     # Make a GET request
     #
     # @param path [String] API path
