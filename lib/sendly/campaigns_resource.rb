@@ -75,7 +75,8 @@ module Sendly
 
   class CampaignPreview
     attr_reader :id, :recipient_count, :estimated_segments, :estimated_credits,
-                :current_balance, :has_enough_credits, :breakdown
+                :current_balance, :has_enough_credits, :breakdown,
+                :blocked_count, :sendable_count, :warnings, :messaging_profile
 
     def initialize(data)
       @id = data["id"]
@@ -85,6 +86,10 @@ module Sendly
       @current_balance = data["current_balance"] || data["currentBalance"] || 0
       @has_enough_credits = data["has_enough_credits"] || data["hasEnoughCredits"] || false
       @breakdown = data["breakdown"]
+      @blocked_count = data["blocked_count"] || data["blockedCount"]
+      @sendable_count = data["sendable_count"] || data["sendableCount"]
+      @warnings = data["warnings"]
+      @messaging_profile = data["messaging_profile"] || data["messagingProfile"]
     end
 
     def enough_credits?
