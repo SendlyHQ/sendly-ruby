@@ -185,5 +185,27 @@ module Sendly
     def delete(id)
       @client.delete("/contacts/#{id}")
     end
+
+    def import_contacts(contacts, list_id: nil, opted_in_at: nil)
+      body = {
+        contacts: contacts.map { |c|
+          h = { phone: c[:phone] }
+          h[:name] = c[:name] if c[:name]
+          h[:email] = c[:email] if c[:email]
+          h[:optedInAt] = c[:opted_in_at] if c[:opted_in_at]
+          h
+        }
+      }
+      body[:listId] = list_id if list_id
+      body[:optedInAt] = opted_in_at if opted_in_at
+
+      response = @client.post("/contacts/import", body)
+      {
+        imported: response["imported"],
+        skipped_duplicates: response["skippedDuplicates"],
+        errors: response["errors"] || [],
+        total_errors: response["totalErrors"] || 0
+      }
+    end
   end
 end
