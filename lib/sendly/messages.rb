@@ -35,12 +35,13 @@ module Sendly
     #     text: "Your verification code is 123456",
     #     message_type: "transactional"
     #   )
-    def send(to:, text:, message_type: nil)
+    def send(to:, text:, message_type: nil, metadata: nil)
       validate_phone!(to)
       validate_text!(text)
 
       body = { to: to, text: text }
       body[:messageType] = message_type if message_type
+      body[:metadata] = metadata if metadata
 
       response = client.post("/messages", body)
       # API returns message directly at top level
@@ -140,7 +141,7 @@ module Sendly
     #     scheduled_at: "2025-01-20T10:00:00Z"
     #   )
     #   puts scheduled["id"]
-    def schedule(to:, text:, scheduled_at:, from: nil, message_type: nil)
+    def schedule(to:, text:, scheduled_at:, from: nil, message_type: nil, metadata: nil)
       validate_phone!(to)
       validate_text!(text)
       raise ValidationError, "scheduled_at is required" if scheduled_at.nil? || scheduled_at.empty?
@@ -148,6 +149,7 @@ module Sendly
       body = { to: to, text: text, scheduledAt: scheduled_at }
       body[:from] = from if from
       body[:messageType] = message_type if message_type
+      body[:metadata] = metadata if metadata
 
       client.post("/messages/schedule", body)
     end
@@ -225,7 +227,7 @@ module Sendly
     #     ]
     #   )
     #   puts "Batch #{result['batchId']}: #{result['queued']} queued"
-    def send_batch(messages:, from: nil, message_type: nil)
+    def send_batch(messages:, from: nil, message_type: nil, metadata: nil)
       raise ValidationError, "Messages array is required" if messages.nil? || messages.empty?
 
       messages.each_with_index do |msg, i|
@@ -241,6 +243,7 @@ module Sendly
       body = { messages: messages }
       body[:from] = from if from
       body[:messageType] = message_type if message_type
+      body[:metadata] = metadata if metadata
 
       client.post("/messages/batch", body)
     end
