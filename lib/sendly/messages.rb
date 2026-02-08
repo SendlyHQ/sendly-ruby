@@ -15,6 +15,7 @@ module Sendly
     # @param to [String] Recipient phone number in E.164 format
     # @param text [String] Message content (max 1600 characters)
     # @param message_type [String] Message type: "marketing" (default) or "transactional"
+    # @param metadata [Hash] Custom JSON metadata to attach to the message (max 4KB)
     # @return [Sendly::Message] The sent message
     #
     # @raise [Sendly::ValidationError] If parameters are invalid
@@ -130,6 +131,7 @@ module Sendly
     # @param scheduled_at [String] ISO 8601 datetime for when to send
     # @param from [String] Sender ID or phone number (optional)
     # @param message_type [String] Message type: "marketing" (default) or "transactional"
+    # @param metadata [Hash] Custom JSON metadata to attach to the message (max 4KB)
     # @return [Hash] The scheduled message
     #
     # @raise [Sendly::ValidationError] If parameters are invalid
@@ -214,6 +216,7 @@ module Sendly
     # @param messages [Array<Hash>] Array of messages with :to and :text keys
     # @param from [String] Sender ID or phone number (optional, applies to all)
     # @param message_type [String] Message type: "marketing" (default) or "transactional"
+    # @param metadata [Hash] Shared metadata for all messages (max 4KB). Each message can also have its own metadata hash which takes priority.
     # @return [Hash] Batch response with batch_id and status
     #
     # @raise [Sendly::ValidationError] If parameters are invalid

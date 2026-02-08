@@ -51,6 +51,9 @@ module Sendly
     # @return [Time, nil] Delivery timestamp
     attr_reader :delivered_at
 
+    # @return [Hash, nil] Custom metadata attached to the message
+    attr_reader :metadata
+
     # Message status constants (sending removed - doesn't exist in database)
     STATUSES = %w[queued sent delivered failed bounced].freeze
 
@@ -74,6 +77,7 @@ module Sendly
       @sender_note = data["senderNote"]
       @created_at = parse_time(data["createdAt"])
       @delivered_at = parse_time(data["deliveredAt"])
+      @metadata = data["metadata"]
     end
 
     # Check if message was delivered
@@ -113,7 +117,8 @@ module Sendly
         warning: warning,
         sender_note: sender_note,
         created_at: created_at&.iso8601,
-        delivered_at: delivered_at&.iso8601
+        delivered_at: delivered_at&.iso8601,
+        metadata: metadata
       }.compact
     end
 
