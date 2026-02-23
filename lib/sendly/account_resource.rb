@@ -94,5 +94,15 @@ module Sendly
 
       @client.delete("/account/keys/#{key_id}")
     end
+
+    def transfer_credits(target_organization_id:, amount:)
+      raise ArgumentError, "Target organization ID is required" if target_organization_id.nil? || target_organization_id.empty?
+      raise ArgumentError, "Amount must be a positive integer" if !amount.is_a?(Integer) || amount <= 0
+
+      @client.post("/credits/transfer", {
+        targetOrganizationId: target_organization_id,
+        amount: amount
+      })
+    end
   end
 end
