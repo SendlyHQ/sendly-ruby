@@ -101,6 +101,15 @@ module Sendly
       WebhookTestResult.new(response)
     end
 
+    # Reset the circuit breaker for a webhook
+    #
+    # @param webhook_id [String] Webhook ID
+    # @return [Hash] Reset confirmation with updated webhook
+    def reset_circuit(webhook_id)
+      validate_webhook_id!(webhook_id)
+      @client.post("/webhooks/#{webhook_id}/reset-circuit")
+    end
+
     # Rotate the webhook signing secret
     #
     # @param webhook_id [String] Webhook ID
