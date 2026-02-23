@@ -51,11 +51,17 @@ module Sendly
     # @return [Time, nil] Delivery timestamp
     attr_reader :delivered_at
 
+    # @return [String, nil] Error code if delivery failed
+    attr_reader :error_code
+
+    # @return [Integer] Number of delivery retry attempts
+    attr_reader :retry_count
+
     # @return [Hash, nil] Custom metadata attached to the message
     attr_reader :metadata
 
     # Message status constants (sending removed - doesn't exist in database)
-    STATUSES = %w[queued sent delivered failed bounced].freeze
+    STATUSES = %w[queued sent delivered failed bounced retrying].freeze
 
     # Sender type constants
     SENDER_TYPES = %w[number_pool alphanumeric sandbox].freeze
@@ -77,6 +83,8 @@ module Sendly
       @sender_note = data["senderNote"]
       @created_at = parse_time(data["createdAt"])
       @delivered_at = parse_time(data["deliveredAt"])
+      @error_code = data["errorCode"]
+      @retry_count = data["retryCount"] || 0
       @metadata = data["metadata"]
     end
 
@@ -118,6 +126,8 @@ module Sendly
         sender_note: sender_note,
         created_at: created_at&.iso8601,
         delivered_at: delivered_at&.iso8601,
+        error_code: error_code,
+        retry_count: retry_count,
         metadata: metadata
       }.compact
     end
