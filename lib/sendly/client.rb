@@ -3,6 +3,7 @@
 require "net/http"
 require "uri"
 require "json"
+require "securerandom"
 
 module Sendly
   # Main Sendly API client
@@ -73,6 +74,13 @@ module Sendly
       @templates ||= TemplatesResource.new(self)
     end
 
+    # Access the Media resource
+    #
+    # @return [Sendly::Media]
+    def media
+      @media ||= Media.new(self)
+    end
+
     # Access the Campaigns resource
     #
     # @return [Sendly::CampaignsResource]
@@ -120,6 +128,60 @@ module Sendly
     # @return [Hash] Response body
     def delete(path)
       request(:delete, path)
+    end
+
+    # Make a multipart POST request for file uploads
+    #
+    # @param path [String] API path
+    # @param file [String, IO] File path or IO object
+    # @param content_type [String] MIME type of the file
+    # @param filename [String] Name for the uploaded file
+    # @return [Hash] Response body
+    def post_multipart(path, file, content_type: "image/jpeg", filename: "upload.jpg")
+      uri = build_uri(path, {})
+      http = build_http(uri)
+
+      boundary = "SendlyRuby#{SecureRandom.hex(16)}"
+
+      file_data = file.is_a?(String) ? File.binread(file) : file.read
+
+      body = []
+      body << "--#{boundary}\r\n"
+      body << "Content-Disposition: form-data; name=\"file\"; filename=\"#{filename}\"\r\n"
+      body << "Content-Type: #{content_type}\r\n\r\n"
+      body << file_data
+      body << "\r\n--#{boundary}--\r\n"
+
+      req = Net::HTTP::Post.new(uri)
+      req["Authorization"] = "Bearer #{api_key}"
+      req["Accept"] = "application/json"
+      req["User-Agent"] = "sendly-ruby/#{VERSION}"
+      req["Content-Type"] = "multipart/form-data; boundary=#{boundary}"
+      req.body = body.join
+
+      attempt = 0
+      begin
+        response = http.request(req)
+        handle_response(response)
+      rescue Net::OpenTimeout, Net::ReadTimeout
+        raise TimeoutError, "Request timed out after #{timeout} seconds"
+      rescue Errno::ECONNREFUSED, Errno::ECONNRESET, SocketError => e
+        raise NetworkError, "Connection failed: #{e.message}"
+      rescue RateLimitError => e
+        attempt += 1
+        if attempt <= max_retries && e.retry_after
+          sleep(e.retry_after)
+          retry
+        end
+        raise
+      rescue ServerError => e
+        attempt += 1
+        if attempt <= max_retries
+          sleep(2 ** attempt)
+          retry
+        end
+        raise
+      end
     end
 
     private

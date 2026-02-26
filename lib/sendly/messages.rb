@@ -36,13 +36,14 @@ module Sendly
     #     text: "Your verification code is 123456",
     #     message_type: "transactional"
     #   )
-    def send(to:, text:, message_type: nil, metadata: nil)
+    def send(to:, text:, message_type: nil, metadata: nil, media_urls: nil)
       validate_phone!(to)
       validate_text!(text)
 
       body = { to: to, text: text }
       body[:messageType] = message_type if message_type
       body[:metadata] = metadata if metadata
+      body[:mediaUrls] = media_urls if media_urls
 
       response = client.post("/messages", body)
       # API returns message directly at top level

@@ -204,6 +204,30 @@ module Sendly
   end
 
   # ============================================================================
+  # Media
+  # ============================================================================
+
+  class MediaFile
+    attr_reader :id, :url, :content_type, :size_bytes
+
+    def initialize(data)
+      @id = data["id"]
+      @url = data["url"]
+      @content_type = data["contentType"]
+      @size_bytes = data["sizeBytes"]
+    end
+
+    def to_h
+      {
+        id: id,
+        url: url,
+        content_type: content_type,
+        size_bytes: size_bytes
+      }.compact
+    end
+  end
+
+  # ============================================================================
   # Webhooks
   # ============================================================================
 
