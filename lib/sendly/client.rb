@@ -95,6 +95,13 @@ module Sendly
       @contacts ||= ContactsResource.new(self)
     end
 
+    # Access the Enterprise resource
+    #
+    # @return [Sendly::EnterpriseResource]
+    def enterprise
+      @enterprise ||= EnterpriseResource.new(self)
+    end
+
     # Make a GET request
     #
     # @param path [String] API path
@@ -120,6 +127,15 @@ module Sendly
     # @return [Hash] Response body
     def patch(path, body = {})
       request(:patch, path, body: body)
+    end
+
+    # Make a PUT request
+    #
+    # @param path [String] API path
+    # @param body [Hash] Request body
+    # @return [Hash] Response body
+    def put(path, body = {})
+      request(:put, path, body: body)
     end
 
     # Make a DELETE request
@@ -250,6 +266,8 @@ module Sendly
               Net::HTTP::Get.new(uri)
             when :post
               Net::HTTP::Post.new(uri)
+            when :put
+              Net::HTTP::Put.new(uri)
             when :patch
               Net::HTTP::Patch.new(uri)
             when :delete
