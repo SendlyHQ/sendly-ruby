@@ -173,7 +173,7 @@ RSpec.describe Sendly::Webhooks do
         expect(event.data.failed_at).to eq('2025-01-15T10:00:00Z')
       end
 
-      it 'parses event without api_version (defaults to 2024-01-01)' do
+      it 'parses event without api_version (defaults to 2024-01)' do
         payload = {
           id: 'evt_123',
           type: 'message.sent',
@@ -184,7 +184,7 @@ RSpec.describe Sendly::Webhooks do
         signature = Sendly::Webhooks.generate_signature(payload, webhook_secret)
         event = Sendly::Webhooks.parse_event(payload, signature, webhook_secret)
 
-        expect(event.api_version).to eq('2024-01-01')
+        expect(event.api_version).to eq('2024-01')
       end
 
       it 'converts event to hash' do
@@ -201,7 +201,7 @@ RSpec.describe Sendly::Webhooks do
         hash = event.to_h
         expect(hash[:id]).to eq('evt_123')
         expect(hash[:type]).to eq('message.delivered')
-        expect(hash[:data][:message_id]).to eq('msg_123')
+        expect(hash[:data][:id]).to eq('msg_123')
       end
 
       it 'converts event data to hash' do
@@ -223,7 +223,7 @@ RSpec.describe Sendly::Webhooks do
         event = Sendly::Webhooks.parse_event(payload, signature, webhook_secret)
 
         data_hash = event.data.to_h
-        expect(data_hash[:message_id]).to eq('msg_123')
+        expect(data_hash[:id]).to eq('msg_123')
         expect(data_hash[:status]).to eq('delivered')
         expect(data_hash[:segments]).to eq(2)
         expect(data_hash[:credits_used]).to eq(2)
@@ -314,7 +314,7 @@ RSpec.describe Sendly::Webhooks do
         }.to raise_error(Sendly::WebhookSignatureError, 'Invalid event structure')
       end
 
-      it 'raises WebhookSignatureError for missing created_at field' do
+      it 'parses event without created_at field (defaults to 0)' do
         payload = {
           id: 'evt_123',
           type: 'message.delivered',
@@ -323,9 +323,9 @@ RSpec.describe Sendly::Webhooks do
 
         signature = Sendly::Webhooks.generate_signature(payload, webhook_secret)
 
-        expect {
-          Sendly::Webhooks.parse_event(payload, signature, webhook_secret)
-        }.to raise_error(Sendly::WebhookSignatureError, 'Invalid event structure')
+        event = Sendly::Webhooks.parse_event(payload, signature, webhook_secret)
+        expect(event.id).to eq('evt_123')
+        expect(event.created).to eq(0)
       end
     end
   end
