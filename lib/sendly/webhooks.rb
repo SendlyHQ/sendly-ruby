@@ -12,14 +12,15 @@ module Sendly
   #
   #     def handle
   #       signature = request.headers['X-Sendly-Signature']
+  #       timestamp = request.headers['X-Sendly-Timestamp']
   #       payload = request.raw_post
   #
   #       begin
-  #         event = Sendly::Webhooks.parse_event(payload, signature, ENV['WEBHOOK_SECRET'])
+  #         event = Sendly::Webhooks.parse_event(payload, signature, ENV['WEBHOOK_SECRET'], timestamp: timestamp)
   #
   #         case event.type
   #         when 'message.delivered'
-  #           puts "Message delivered: #{event.data.message_id}"
+  #           puts "Message delivered: #{event.data.id}"
   #         when 'message.failed'
   #           puts "Message failed: #{event.data.error}"
   #         end
@@ -31,21 +32,30 @@ module Sendly
   #     end
   #   end
   module Webhooks
+    SIGNATURE_TOLERANCE_SECONDS = 300
+
     class << self
       # Verify webhook signature from Sendly.
       #
       # @param payload [String] Raw request body as string
       # @param signature [String] X-Sendly-Signature header value
       # @param secret [String] Your webhook secret from dashboard
+      # @param timestamp [String, nil] X-Sendly-Timestamp header value (recommended)
       # @return [Boolean] True if signature is valid, false otherwise
-      def verify_signature(payload, signature, secret)
+      def verify_signature(payload, signature, secret, timestamp: nil)
         return false if payload.nil? || payload.empty?
         return false if signature.nil? || signature.empty?
         return false if secret.nil? || secret.empty?
 
-        expected = 'sha256=' + OpenSSL::HMAC.hexdigest('SHA256', secret, payload)
+        if timestamp
+          signed_payload = "#{timestamp}.#{payload}"
+          return false if (Time.now.to_i - timestamp.to_i).abs > SIGNATURE_TOLERANCE_SECONDS
+        else
+          signed_payload = payload
+        end
 
-        # Timing-safe comparison
+        expected = 'sha256=' + OpenSSL::HMAC.hexdigest('SHA256', secret, signed_payload)
+
         secure_compare(expected, signature)
       end
 
@@ -54,14 +64,17 @@ module Sendly
       # @param payload [String] Raw request body as string
       # @param signature [String] X-Sendly-Signature header value
       # @param secret [String] Your webhook secret from dashboard
+      # @param timestamp [String, nil] X-Sendly-Timestamp header value (recommended)
       # @return [WebhookEvent] Parsed and validated event
       # @raise [WebhookSignatureError] If signature is invalid or payload is malformed
-      def parse_event(payload, signature, secret)
-        raise WebhookSignatureError, 'Invalid webhook signature' unless verify_signature(payload, signature, secret)
+      def parse_event(payload, signature, secret, timestamp: nil)
+        unless verify_signature(payload, signature, secret, timestamp: timestamp)
+          raise WebhookSignatureError, 'Invalid webhook signature'
+        end
 
         data = JSON.parse(payload, symbolize_names: true)
 
-        unless data[:id] && data[:type] && data[:data] && data[:created_at]
+        unless data[:id] && data[:type] && data[:data]
           raise WebhookSignatureError, 'Invalid event structure'
         end
 
@@ -74,14 +87,15 @@ module Sendly
       #
       # @param payload [String] The payload to sign
       # @param secret [String] The secret to use for signing
+      # @param timestamp [String, nil] Optional timestamp to include in signature
       # @return [String] The signature in the format "sha256=..."
-      def generate_signature(payload, secret)
-        'sha256=' + OpenSSL::HMAC.hexdigest('SHA256', secret, payload)
+      def generate_signature(payload, secret, timestamp: nil)
+        signed_payload = timestamp ? "#{timestamp}.#{payload}" : payload
+        'sha256=' + OpenSSL::HMAC.hexdigest('SHA256', secret, signed_payload)
       end
 
       private
 
-      # Timing-safe string comparison
       def secure_compare(a, b)
         return false unless a.bytesize == b.bytesize
 
@@ -93,23 +107,27 @@ module Sendly
     end
   end
 
-  # Webhook signature verification error
   class WebhookSignatureError < Error
     def initialize(message = 'Invalid webhook signature')
       super(message, code: 'WEBHOOK_SIGNATURE_ERROR')
     end
   end
 
-  # Webhook event from Sendly
   class WebhookEvent
-    attr_reader :id, :type, :data, :created_at, :api_version
+    attr_reader :id, :type, :data, :created, :api_version, :livemode
 
     def initialize(data)
       @id = data[:id]
       @type = data[:type]
-      @data = WebhookMessageData.new(data[:data])
-      @created_at = data[:created_at]
-      @api_version = data[:api_version] || '2024-01-01'
+      obj = data[:data][:object] || data[:data]
+      @data = WebhookMessageData.new(obj)
+      @created = data[:created] || data[:created_at] || 0
+      @api_version = data[:api_version] || '2024-01'
+      @livemode = data[:livemode] || false
+    end
+
+    def created_at
+      @created
     end
 
     def to_h
@@ -117,36 +135,48 @@ module Sendly
         id: @id,
         type: @type,
         data: @data.to_h,
-        created_at: @created_at,
-        api_version: @api_version
+        created: @created,
+        api_version: @api_version,
+        livemode: @livemode
       }
     end
   end
 
-  # Webhook message data
   class WebhookMessageData
-    attr_reader :message_id, :status, :to, :from, :error, :error_code,
-                :delivered_at, :failed_at, :segments, :credits_used
+    attr_reader :id, :status, :to, :from, :direction, :organization_id,
+                :text, :error, :error_code, :delivered_at, :failed_at,
+                :created_at, :segments, :credits_used, :message_format, :media_urls
 
     def initialize(data)
-      @message_id = data[:message_id]
+      @id = data[:id] || data[:message_id] || ''
       @status = data[:status]
       @to = data[:to]
       @from = data[:from] || ''
+      @direction = data[:direction] || 'outbound'
+      @organization_id = data[:organization_id]
+      @text = data[:text]
       @error = data[:error]
       @error_code = data[:error_code]
       @delivered_at = data[:delivered_at]
       @failed_at = data[:failed_at]
+      @created_at = data[:created_at]
       @segments = data[:segments] || 1
       @credits_used = data[:credits_used] || 0
+      @message_format = data[:message_format]
+      @media_urls = data[:media_urls]
+    end
+
+    def message_id
+      @id
     end
 
     def to_h
       {
-        message_id: @message_id,
+        id: @id,
         status: @status,
         to: @to,
         from: @from,
+        direction: @direction,
         error: @error,
         error_code: @error_code,
         delivered_at: @delivered_at,
