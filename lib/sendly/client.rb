@@ -20,21 +20,26 @@ module Sendly
     # @return [Integer] Maximum retry attempts
     attr_reader :max_retries
 
+    # @return [String, nil] Organization ID
+    attr_accessor :organization_id
+
     # Create a new Sendly client
     #
     # @param api_key [String] Your Sendly API key
     # @param base_url [String] API base URL (optional)
     # @param timeout [Integer] Request timeout in seconds (default: 30)
     # @param max_retries [Integer] Maximum retry attempts (default: 3)
+    # @param organization_id [String, nil] Organization ID (optional)
     #
     # @example
     #   client = Sendly::Client.new("sk_live_v1_xxx")
     #   client = Sendly::Client.new("sk_live_v1_xxx", timeout: 60, max_retries: 5)
-    def initialize(api_key:, base_url: nil, timeout: 30, max_retries: 3)
+    def initialize(api_key:, base_url: nil, timeout: 30, max_retries: 3, organization_id: nil)
       @api_key = api_key
       @base_url = (base_url || Sendly.base_url).chomp("/")
       @timeout = timeout
       @max_retries = max_retries
+      @organization_id = organization_id || ENV["SENDLY_ORG_ID"]
 
       validate_api_key!
     end
@@ -173,6 +178,7 @@ module Sendly
       req["Accept"] = "application/json"
       req["User-Agent"] = "sendly-ruby/#{VERSION}"
       req["Content-Type"] = "multipart/form-data; boundary=#{boundary}"
+      req["X-Organization-Id"] = @organization_id if @organization_id
       req.body = body.join
 
       attempt = 0
@@ -280,6 +286,7 @@ module Sendly
       req["Content-Type"] = "application/json"
       req["Accept"] = "application/json"
       req["User-Agent"] = "sendly-ruby/#{VERSION}"
+      req["X-Organization-Id"] = @organization_id if @organization_id
 
       req.body = body.to_json if body
 
