@@ -9,7 +9,7 @@
 
 # Sendly Ruby SDK
 
-Official Ruby SDK for the Sendly SMS API.
+Official Ruby SDK for the Sendly SMS & MMS API.
 
 ## Installation
 
