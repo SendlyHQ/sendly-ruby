@@ -387,14 +387,14 @@ result = client.enterprise.provision(
   name: "Acme Insurance - Austin",
   source_workspace_id: "ws_verified",
   credit_amount: 5000,
-  credit_source_workspace_id: "ws_pool",
+  credit_source_workspace_id: "SOURCE_WORKSPACE_ID",
   key_name: "Production",
   key_type: "live",
   generate_opt_in_page: true
 )
 
 puts result["workspace"]["id"]
-puts result["apiKey"]["rawKey"]
+puts result["key"]["key"]
 ```
 
 Three provisioning modes:
@@ -422,7 +422,7 @@ client.enterprise.workspaces.transfer_credits("ws_dest",
 
 key = client.enterprise.workspaces.create_key("ws_xxx",
   name: "Production", type: "live")
-puts key["rawKey"]
+puts key["key"]
 
 client.enterprise.workspaces.revoke_key("ws_xxx", "key_abc")
 ```
