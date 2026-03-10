@@ -340,7 +340,7 @@ module Sendly
     end
 
     def get
-      @client.get("/enterprise/credits/pool")
+      @client.get("/enterprise/credits")
     end
 
     def deposit(amount:, description: nil)
@@ -349,7 +349,7 @@ module Sendly
       body = { amount: amount }
       body[:description] = description if description
 
-      @client.post("/enterprise/credits/pool/deposit", body)
+      @client.post("/enterprise/credits/deposit", body)
     end
   end
 
