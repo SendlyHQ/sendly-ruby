@@ -334,8 +334,27 @@ module Sendly
     end
   end
 
+  class EnterpriseCreditsSubResource
+    def initialize(client)
+      @client = client
+    end
+
+    def get
+      @client.get("/enterprise/credits/pool")
+    end
+
+    def deposit(amount:, description: nil)
+      raise ArgumentError, "Amount must be a positive number" if !amount.is_a?(Integer) || amount <= 0
+
+      body = { amount: amount }
+      body[:description] = description if description
+
+      @client.post("/enterprise/credits/pool/deposit", body)
+    end
+  end
+
   class EnterpriseResource
-    attr_reader :workspaces, :webhooks, :analytics, :settings, :billing
+    attr_reader :workspaces, :webhooks, :analytics, :settings, :billing, :credits
 
     def initialize(client)
       @client = client
@@ -344,6 +363,7 @@ module Sendly
       @analytics = EnterpriseAnalyticsSubResource.new(client)
       @settings = EnterpriseSettingsSubResource.new(client)
       @billing = EnterpriseBillingSubResource.new(client)
+      @credits = EnterpriseCreditsSubResource.new(client)
     end
 
     def get_account
