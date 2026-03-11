@@ -253,7 +253,7 @@ module Sendly
     def set(url:)
       raise ArgumentError, "Webhook URL is required" if url.nil? || url.empty?
 
-      @client.put("/enterprise/webhooks", { url: url })
+      @client.post("/enterprise/webhooks", { url: url })
     end
 
     def get
@@ -266,6 +266,10 @@ module Sendly
 
     def test
       @client.post("/enterprise/webhooks/test")
+    end
+
+    def rotate_secret
+      @client.post("/enterprise/webhooks/rotate-secret")
     end
   end
 
