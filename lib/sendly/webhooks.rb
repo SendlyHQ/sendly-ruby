@@ -145,7 +145,8 @@ module Sendly
   class WebhookMessageData
     attr_reader :id, :status, :to, :from, :direction, :organization_id,
                 :text, :error, :error_code, :delivered_at, :failed_at,
-                :created_at, :segments, :credits_used, :message_format, :media_urls
+                :created_at, :segments, :credits_used, :message_format, :media_urls,
+                :retry_count, :metadata
 
     def initialize(data)
       @id = data[:id] || data[:message_id] || ''
@@ -164,6 +165,8 @@ module Sendly
       @credits_used = data[:credits_used] || 0
       @message_format = data[:message_format]
       @media_urls = data[:media_urls]
+      @retry_count = data[:retry_count]
+      @metadata = data[:metadata]
     end
 
     def message_id
@@ -184,6 +187,29 @@ module Sendly
         segments: @segments,
         credits_used: @credits_used
       }.compact
+    end
+  end
+
+  class WebhookVerificationData
+    attr_reader :id, :organization_id, :phone, :status, :delivery_status,
+                :attempts, :max_attempts, :expires_at, :verified_at,
+                :created_at, :app_name, :template_id, :profile_id, :metadata
+
+    def initialize(data = {})
+      @id = data["id"]
+      @organization_id = data["organization_id"]
+      @phone = data["phone"]
+      @status = data["status"]
+      @delivery_status = data["delivery_status"] || "queued"
+      @attempts = data["attempts"] || 0
+      @max_attempts = data["max_attempts"] || 3
+      @expires_at = data["expires_at"]
+      @verified_at = data["verified_at"]
+      @created_at = data["created_at"]
+      @app_name = data["app_name"]
+      @template_id = data["template_id"]
+      @profile_id = data["profile_id"]
+      @metadata = data["metadata"]
     end
   end
 end
