@@ -36,7 +36,7 @@ module Sendly
     # @return [String, nil] How the message was sent (number_pool, alphanumeric, sandbox)
     attr_reader :sender_type
 
-    # @return [String, nil] Telnyx message ID for tracking
+    # @return [String, nil] Carrier message ID for tracking
     attr_reader :telnyx_message_id
 
     # @return [String, nil] Warning message
@@ -493,6 +493,121 @@ module Sendly
       Time.parse(value)
     rescue ArgumentError
       nil
+    end
+  end
+
+  # ============================================================================
+  # Conversations
+  # ============================================================================
+
+  class Conversation
+    attr_reader :id, :phone_number, :status, :unread_count, :message_count,
+                :last_message_text, :last_message_at, :last_message_direction,
+                :metadata, :tags, :contact_id, :created_at, :updated_at
+
+    STATUSES = %w[active closed].freeze
+
+    def initialize(data)
+      @id = data["id"]
+      @phone_number = data["phoneNumber"] || data["phone_number"]
+      @status = data["status"]
+      @unread_count = data["unreadCount"] || data["unread_count"] || 0
+      @message_count = data["messageCount"] || data["message_count"] || 0
+      @last_message_text = data["lastMessageText"] || data["last_message_text"]
+      @last_message_at = parse_time(data["lastMessageAt"] || data["last_message_at"])
+      @last_message_direction = data["lastMessageDirection"] || data["last_message_direction"]
+      @metadata = data["metadata"] || {}
+      @tags = data["tags"] || []
+      @contact_id = data["contactId"] || data["contact_id"]
+      @created_at = parse_time(data["createdAt"] || data["created_at"])
+      @updated_at = parse_time(data["updatedAt"] || data["updated_at"])
+    end
+
+    def active?
+      status == "active"
+    end
+
+    def closed?
+      status == "closed"
+    end
+
+    def to_h
+      {
+        id: id, phone_number: phone_number, status: status,
+        unread_count: unread_count, message_count: message_count,
+        last_message_text: last_message_text,
+        last_message_at: last_message_at&.iso8601,
+        last_message_direction: last_message_direction,
+        metadata: metadata, tags: tags, contact_id: contact_id,
+        created_at: created_at&.iso8601, updated_at: updated_at&.iso8601
+      }.compact
+    end
+
+    private
+
+    def parse_time(value)
+      return nil if value.nil?
+      Time.parse(value)
+    rescue ArgumentError
+      nil
+    end
+  end
+
+  class ConversationList
+    include Enumerable
+
+    attr_reader :data, :total, :limit, :offset, :has_more
+
+    def initialize(response)
+      @data = (response["data"] || []).map { |c| Conversation.new(c) }
+      pagination = response["pagination"] || {}
+      @total = pagination["total"] || @data.length
+      @limit = pagination["limit"] || 20
+      @offset = pagination["offset"] || 0
+      @has_more = pagination["hasMore"] || pagination["has_more"] || false
+    end
+
+    def each(&block)
+      data.each(&block)
+    end
+
+    def count
+      data.length
+    end
+
+    alias size count
+    alias length count
+
+    def empty?
+      data.empty?
+    end
+
+    def first
+      data.first
+    end
+
+    def last
+      data.last
+    end
+  end
+
+  class ConversationWithMessages < Conversation
+    attr_reader :messages
+
+    def initialize(data)
+      super(data)
+      if data["messages"]
+        msgs = data["messages"]
+        @messages = {
+          data: (msgs["data"] || []).map { |m| Message.new(m) },
+          pagination: {
+            total: msgs.dig("pagination", "total") || 0,
+            limit: msgs.dig("pagination", "limit") || 20,
+            offset: msgs.dig("pagination", "offset") || 0,
+            has_more: msgs.dig("pagination", "hasMore") || msgs.dig("pagination", "has_more") || false
+          }
+        }
+      end
     end
   end
 end

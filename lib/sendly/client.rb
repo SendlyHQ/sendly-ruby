@@ -100,6 +100,13 @@ module Sendly
       @contacts ||= ContactsResource.new(self)
     end
 
+    # Access the Conversations resource
+    #
+    # @return [Sendly::ConversationsResource]
+    def conversations
+      @conversations ||= ConversationsResource.new(self)
+    end
+
     # Access the Enterprise resource
     #
     # @return [Sendly::EnterpriseResource]

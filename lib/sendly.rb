@@ -16,6 +16,7 @@ require_relative "sendly/verify"
 require_relative "sendly/templates_resource"
 require_relative "sendly/campaigns_resource"
 require_relative "sendly/contacts_resource"
+require_relative "sendly/conversations_resource"
 require_relative "sendly/enterprise"
 
 # Sendly Ruby SDK
