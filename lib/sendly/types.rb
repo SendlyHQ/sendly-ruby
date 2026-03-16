@@ -60,6 +60,9 @@ module Sendly
     # @return [Hash, nil] Custom metadata attached to the message
     attr_reader :metadata
 
+    # @return [Hash, nil] AI classification metadata for inbound messages
+    attr_reader :ai_metadata
+
     # Message status constants (sending removed - doesn't exist in database)
     STATUSES = %w[queued sent delivered failed bounced retrying].freeze
 
@@ -86,6 +89,7 @@ module Sendly
       @error_code = data["errorCode"]
       @retry_count = data["retryCount"] || 0
       @metadata = data["metadata"]
+      @ai_metadata = data["aiMetadata"]
     end
 
     # Check if message was delivered
@@ -128,7 +132,8 @@ module Sendly
         delivered_at: delivered_at&.iso8601,
         error_code: error_code,
         retry_count: retry_count,
-        metadata: metadata
+        metadata: metadata,
+        ai_metadata: ai_metadata
       }.compact
     end
 
