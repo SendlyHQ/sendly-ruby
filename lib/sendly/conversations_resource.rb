@@ -79,6 +79,23 @@ module Sendly
       Conversation.new(response)
     end
 
+    def add_labels(id, label_ids:)
+      raise ValidationError, "Conversation ID is required" if id.nil? || id.empty?
+      raise ValidationError, "Label IDs are required" if label_ids.nil? || label_ids.empty?
+
+      encoded_id = URI.encode_www_form_component(id)
+      @client.post("/conversations/#{encoded_id}/labels", { labelIds: label_ids })
+    end
+
+    def remove_label(id, label_id:)
+      raise ValidationError, "Conversation ID is required" if id.nil? || id.empty?
+      raise ValidationError, "Label ID is required" if label_id.nil? || label_id.empty?
+
+      encoded_id = URI.encode_www_form_component(id)
+      encoded_label_id = URI.encode_www_form_component(label_id)
+      @client.delete("/conversations/#{encoded_id}/labels/#{encoded_label_id}")
+    end
+
     def each(status: nil, batch_size: 100, &block)
       return enum_for(:each, status: status, batch_size: batch_size) unless block_given?
 

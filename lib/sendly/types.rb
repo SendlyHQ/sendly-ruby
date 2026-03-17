@@ -596,6 +596,137 @@ module Sendly
     end
   end
 
+  # ============================================================================
+  # Labels
+  # ============================================================================
+
+  class Label
+    attr_reader :id, :name, :color, :description, :created_at
+
+    def initialize(data)
+      @id = data["id"]
+      @name = data["name"]
+      @color = data["color"]
+      @description = data["description"]
+      @created_at = parse_time(data["createdAt"] || data["created_at"])
+    end
+
+    def to_h
+      {
+        id: id, name: name, color: color, description: description,
+        created_at: created_at&.iso8601
+      }.compact
+    end
+
+    private
+
+    def parse_time(value)
+      return nil if value.nil?
+      Time.parse(value)
+    rescue ArgumentError
+      nil
+    end
+  end
+
+  # ============================================================================
+  # Drafts
+  # ============================================================================
+
+  class Draft
+    attr_reader :id, :conversation_id, :text, :media_urls, :metadata, :status,
+                :source, :created_by, :reviewed_by, :reviewed_at,
+                :rejection_reason, :message_id, :created_at, :updated_at
+
+    STATUSES = %w[pending approved rejected sent failed].freeze
+
+    def initialize(data)
+      @id = data["id"]
+      @conversation_id = data["conversationId"] || data["conversation_id"]
+      @text = data["text"]
+      @media_urls = data["mediaUrls"] || data["media_urls"] || []
+      @metadata = data["metadata"] || {}
+      @status = data["status"]
+      @source = data["source"]
+      @created_by = data["createdBy"] || data["created_by"]
+      @reviewed_by = data["reviewedBy"] || data["reviewed_by"]
+      @reviewed_at = parse_time(data["reviewedAt"] || data["reviewed_at"])
+      @rejection_reason = data["rejectionReason"] || data["rejection_reason"]
+      @message_id = data["messageId"] || data["message_id"]
+      @created_at = parse_time(data["createdAt"] || data["created_at"])
+      @updated_at = parse_time(data["updatedAt"] || data["updated_at"])
+    end
+
+    def pending?
+      status == "pending"
+    end
+
+    def approved?
+      status == "approved"
+    end
+
+    def rejected?
+      status == "rejected"
+    end
+
+    def to_h
+      {
+        id: id, conversation_id: conversation_id, text: text,
+        media_urls: media_urls, metadata: metadata, status: status,
+        source: source, created_by: created_by, reviewed_by: reviewed_by,
+        reviewed_at: reviewed_at&.iso8601, rejection_reason: rejection_reason,
+        message_id: message_id, created_at: created_at&.iso8601,
+        updated_at: updated_at&.iso8601
+      }.compact
+    end
+
+    private
+
+    def parse_time(value)
+      return nil if value.nil?
+      Time.parse(value)
+    rescue ArgumentError
+      nil
+    end
+  end
+
+  class DraftList
+    include Enumerable
+
+    attr_reader :data, :total, :limit, :offset, :has_more
+
+    def initialize(response)
+      @data = (response["data"] || []).map { |d| Draft.new(d) }
+      pagination = response["pagination"] || {}
+      @total = pagination["total"] || @data.length
+      @limit = pagination["limit"] || 20
+      @offset = pagination["offset"] || 0
+      @has_more = pagination["hasMore"] || pagination["has_more"] || false
+    end
+
+    def each(&block)
+      data.each(&block)
+    end
+
+    def count
+      data.length
+    end
+
+    alias size count
+    alias length count
+
+    def empty?
+      data.empty?
+    end
+
+    def first
+      data.first
+    end
+
+    def last
+      data.last
+    end
+  end
+
   class ConversationWithMessages < Conversation
     attr_reader :messages
 

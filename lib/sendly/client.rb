@@ -107,6 +107,20 @@ module Sendly
       @conversations ||= ConversationsResource.new(self)
     end
 
+    # Access the Labels resource
+    #
+    # @return [Sendly::LabelsResource]
+    def labels
+      @labels ||= LabelsResource.new(self)
+    end
+
+    # Access the Drafts resource
+    #
+    # @return [Sendly::DraftsResource]
+    def drafts
+      @drafts ||= DraftsResource.new(self)
+    end
+
     # Access the Enterprise resource
     #
     # @return [Sendly::EnterpriseResource]
