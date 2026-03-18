@@ -390,5 +390,19 @@ module Sendly
 
       @client.post("/enterprise/workspaces/provision", body)
     end
+
+    def generate_business_page(business_name:, use_case: nil, use_case_summary: nil, contact_email: nil, contact_phone: nil, business_address: nil, social_url: nil)
+      raise ArgumentError, "Business name is required" if business_name.nil? || business_name.strip.empty?
+
+      body = { businessName: business_name }
+      body[:useCase] = use_case if use_case
+      body[:useCaseSummary] = use_case_summary if use_case_summary
+      body[:contactEmail] = contact_email if contact_email
+      body[:contactPhone] = contact_phone if contact_phone
+      body[:businessAddress] = business_address if business_address
+      body[:socialUrl] = social_url if social_url
+
+      @client.post("/verification/business-page/generate", body)
+    end
   end
 end
