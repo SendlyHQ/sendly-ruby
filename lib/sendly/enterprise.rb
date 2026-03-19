@@ -402,7 +402,7 @@ module Sendly
       body[:businessAddress] = business_address if business_address
       body[:socialUrl] = social_url if social_url
 
-      @client.post("/verification/business-page/generate", body)
+      @client.post("/enterprise/business-page/generate", body)
     end
   end
 end
