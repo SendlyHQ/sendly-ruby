@@ -404,5 +404,64 @@ module Sendly
 
       @client.post("/enterprise/business-page/generate", body)
     end
+
+    def upload_verification_document(file_path, workspace_id: nil, verification_id: nil)
+      raise ArgumentError, "File path is required" if file_path.nil? || file_path.empty?
+      raise ArgumentError, "File not found: #{file_path}" unless File.exist?(file_path)
+
+      content_type = case File.extname(file_path).downcase
+                     when ".jpg", ".jpeg" then "image/jpeg"
+                     when ".png" then "image/png"
+                     when ".gif" then "image/gif"
+                     when ".pdf" then "application/pdf"
+                     when ".webp" then "image/webp"
+                     else "application/octet-stream"
+                     end
+
+      filename = File.basename(file_path)
+
+      boundary = "SendlyRuby#{SecureRandom.hex(16)}"
+      body_parts = []
+      body_parts << "--#{boundary}\r\n"
+      body_parts << "Content-Disposition: form-data; name=\"file\"; filename=\"#{filename}\"\r\n"
+      body_parts << "Content-Type: #{content_type}\r\n\r\n"
+      body_parts << File.binread(file_path)
+
+      if workspace_id
+        body_parts << "\r\n--#{boundary}\r\n"
+        body_parts << "Content-Disposition: form-data; name=\"workspaceId\"\r\n\r\n"
+        body_parts << workspace_id
+      end
+
+      if verification_id
+        body_parts << "\r\n--#{boundary}\r\n"
+        body_parts << "Content-Disposition: form-data; name=\"verificationId\"\r\n\r\n"
+        body_parts << verification_id
+      end
+
+      body_parts << "\r\n--#{boundary}--\r\n"
+
+      uri = URI.parse("#{@client.base_url}/enterprise/verification-document/upload")
+      http = Net::HTTP.new(uri.host, uri.port)
+      http.use_ssl = uri.scheme == "https"
+      http.open_timeout = 10
+      http.read_timeout = @client.timeout
+
+      req = Net::HTTP::Post.new(uri)
+      req["Authorization"] = "Bearer #{@client.api_key}"
+      req["Accept"] = "application/json"
+      req["User-Agent"] = "sendly-ruby/#{Sendly::VERSION}"
+      req["Content-Type"] = "multipart/form-data; boundary=#{boundary}"
+      req["X-Organization-Id"] = @client.organization_id if @client.organization_id
+      req.body = body_parts.join
+
+      response = http.request(req)
+      body = response.body.nil? || response.body.empty? ? {} : JSON.parse(response.body)
+      status = response.code.to_i
+
+      return body if status >= 200 && status < 300
+
+      raise Sendly::ErrorFactory.from_response(status, body)
+    end
   end
 end
