@@ -121,6 +121,13 @@ module Sendly
       @drafts ||= DraftsResource.new(self)
     end
 
+    # Access the Rules resource
+    #
+    # @return [Sendly::RulesResource]
+    def rules
+      @rules ||= RulesResource.new(self)
+    end
+
     # Access the Enterprise resource
     #
     # @return [Sendly::EnterpriseResource]

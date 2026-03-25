@@ -96,6 +96,17 @@ module Sendly
       @client.delete("/conversations/#{encoded_id}/labels/#{encoded_label_id}")
     end
 
+    def get_context(id, max_messages: nil)
+      raise ValidationError, "Conversation ID is required" if id.nil? || id.empty?
+
+      params = {}
+      params[:max_messages] = max_messages if max_messages
+
+      encoded_id = URI.encode_www_form_component(id)
+      response = @client.get("/conversations/#{encoded_id}/context", params.compact)
+      ConversationContext.new(response)
+    end
+
     def each(status: nil, batch_size: 100, &block)
       return enum_for(:each, status: status, batch_size: batch_size) unless block_given?
 

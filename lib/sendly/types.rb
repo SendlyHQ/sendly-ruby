@@ -746,4 +746,96 @@ module Sendly
       end
     end
   end
+
+  # ============================================================================
+  # Conversation Context
+  # ============================================================================
+
+  class ConversationContext
+    attr_reader :context, :conversation, :token_estimate, :business
+
+    def initialize(data)
+      @context = data["context"]
+      @conversation = {
+        id: data.dig("conversation", "id"),
+        phone_number: data.dig("conversation", "phoneNumber") || data.dig("conversation", "phone_number"),
+        status: data.dig("conversation", "status"),
+        message_count: data.dig("conversation", "messageCount") || data.dig("conversation", "message_count") || 0,
+        unread_count: data.dig("conversation", "unreadCount") || data.dig("conversation", "unread_count") || 0
+      }
+      @token_estimate = data["tokenEstimate"] || data["token_estimate"] || 0
+      if data["business"]
+        @business = {
+          name: data.dig("business", "name"),
+          use_case: data.dig("business", "useCase") || data.dig("business", "use_case")
+        }
+      end
+    end
+
+    def to_h
+      result = {
+        context: context,
+        conversation: conversation,
+        token_estimate: token_estimate
+      }
+      result[:business] = business if business
+      result
+    end
+  end
+
+  # ============================================================================
+  # Rules
+  # ============================================================================
+
+  class Rule
+    attr_reader :id, :name, :conditions, :actions, :priority, :created_at, :updated_at
+
+    def initialize(data)
+      @id = data["id"]
+      @name = data["name"]
+      @conditions = data["conditions"] || {}
+      @actions = data["actions"] || {}
+      @priority = data["priority"]
+      @created_at = parse_time(data["createdAt"] || data["created_at"])
+      @updated_at = parse_time(data["updatedAt"] || data["updated_at"])
+    end
+
+    def to_h
+      {
+        id: id, name: name, conditions: conditions, actions: actions,
+        priority: priority, created_at: created_at&.iso8601,
+        updated_at: updated_at&.iso8601
+      }.compact
+    end
+
+    private
+
+    def parse_time(value)
+      return nil if value.nil?
+      Time.parse(value)
+    rescue ArgumentError
+      nil
+    end
+  end
+
+  # ============================================================================
+  # Generated Template
+  # ============================================================================
+
+  class GeneratedTemplate
+    attr_reader :name, :text, :variables, :category
+
+    def initialize(data)
+      @name = data["name"]
+      @text = data["text"]
+      @variables = data["variables"] || []
+      @category = data["category"]
+    end
+
+    def to_h
+      {
+        name: name, text: text, variables: variables, category: category
+      }.compact
+    end
+  end
 end

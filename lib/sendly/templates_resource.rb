@@ -111,5 +111,12 @@ module Sendly
       response = @client.post("/templates/#{id}/clone", body)
       Template.new(response)
     end
+
+    def generate(description:, category: nil)
+      body = { description: description }
+      body[:category] = category if category
+      response = @client.post("/templates/generate", body)
+      GeneratedTemplate.new(response)
+    end
   end
 end
