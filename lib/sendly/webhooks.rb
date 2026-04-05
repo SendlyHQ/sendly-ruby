@@ -146,7 +146,7 @@ module Sendly
     attr_reader :id, :status, :to, :from, :direction, :organization_id,
                 :text, :error, :error_code, :delivered_at, :failed_at,
                 :created_at, :segments, :credits_used, :message_format, :media_urls,
-                :retry_count, :metadata
+                :retry_count, :metadata, :batch_id
 
     def initialize(data)
       @id = data[:id] || data[:message_id] || ''
@@ -167,6 +167,7 @@ module Sendly
       @media_urls = data[:media_urls]
       @retry_count = data[:retry_count]
       @metadata = data[:metadata]
+      @batch_id = data[:batch_id]
     end
 
     def message_id
@@ -185,7 +186,8 @@ module Sendly
         delivered_at: @delivered_at,
         failed_at: @failed_at,
         segments: @segments,
-        credits_used: @credits_used
+        credits_used: @credits_used,
+        batch_id: @batch_id
       }.compact
     end
   end
