@@ -3,6 +3,8 @@
 module Sendly
   class Contact
     attr_reader :id, :phone_number, :name, :email, :metadata, :opted_out,
+                :line_type, :carrier_name, :line_type_checked_at,
+                :invalid_reason, :invalidated_at,
                 :created_at, :updated_at, :lists
 
     def initialize(data)
@@ -12,6 +14,11 @@ module Sendly
       @email = data["email"]
       @metadata = data["metadata"] || {}
       @opted_out = data["opted_out"] || data["optedOut"] || false
+      @line_type = data["line_type"] || data["lineType"]
+      @carrier_name = data["carrier_name"] || data["carrierName"]
+      @line_type_checked_at = parse_time(data["line_type_checked_at"] || data["lineTypeCheckedAt"])
+      @invalid_reason = data["invalid_reason"] || data["invalidReason"]
+      @invalidated_at = parse_time(data["invalidated_at"] || data["invalidatedAt"])
       @created_at = parse_time(data["created_at"] || data["createdAt"])
       @updated_at = parse_time(data["updated_at"] || data["updatedAt"])
       @lists = data["lists"]&.map { |l| { id: l["id"], name: l["name"] } }
@@ -21,10 +28,18 @@ module Sendly
       opted_out
     end
 
+    def invalid?
+      !invalid_reason.nil?
+    end
+
     def to_h
       {
         id: id, phone_number: phone_number, name: name, email: email,
         metadata: metadata, opted_out: opted_out,
+        line_type: line_type, carrier_name: carrier_name,
+        line_type_checked_at: line_type_checked_at&.iso8601,
+        invalid_reason: invalid_reason,
+        invalidated_at: invalidated_at&.iso8601,
         created_at: created_at&.iso8601, updated_at: updated_at&.iso8601,
         lists: lists
       }.compact
@@ -184,6 +199,23 @@ module Sendly
 
     def delete(id)
       @client.delete("/contacts/#{id}")
+    end
+
+    # Clear the invalid flag on a contact so future campaigns include it again.
+    # Contacts get auto-flagged when a send fails with a terminal bad-number
+    # error (landline, invalid number) or when a carrier lookup reports they
+    # can't receive SMS.
+    def mark_valid(id)
+      response = @client.post("/contacts/#{id}/mark-valid", {})
+      Contact.new(response)
+    end
+
+    # Trigger a background carrier lookup across your contacts. Landlines
+    # and other non-SMS-capable numbers are auto-excluded from future
+    # campaigns. The lookup runs asynchronously (1-5 minutes).
+    # Options: list_id (scope to a single list), force (re-check already-looked-up)
+    def check_numbers(list_id: nil, force: false)
+      @client.post("/contacts/lookup", { listId: list_id, force: force })
     end
 
     def import_contacts(contacts, list_id: nil, opted_in_at: nil)
