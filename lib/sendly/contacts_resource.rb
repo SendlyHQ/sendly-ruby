@@ -4,7 +4,7 @@ module Sendly
   class Contact
     attr_reader :id, :phone_number, :name, :email, :metadata, :opted_out,
                 :line_type, :carrier_name, :line_type_checked_at,
-                :invalid_reason, :invalidated_at,
+                :invalid_reason, :invalidated_at, :user_marked_valid_at,
                 :created_at, :updated_at, :lists
 
     def initialize(data)
@@ -19,6 +19,7 @@ module Sendly
       @line_type_checked_at = parse_time(data["line_type_checked_at"] || data["lineTypeCheckedAt"])
       @invalid_reason = data["invalid_reason"] || data["invalidReason"]
       @invalidated_at = parse_time(data["invalidated_at"] || data["invalidatedAt"])
+      @user_marked_valid_at = parse_time(data["user_marked_valid_at"] || data["userMarkedValidAt"])
       @created_at = parse_time(data["created_at"] || data["createdAt"])
       @updated_at = parse_time(data["updated_at"] || data["updatedAt"])
       @lists = data["lists"]&.map { |l| { id: l["id"], name: l["name"] } }
@@ -40,6 +41,7 @@ module Sendly
         line_type_checked_at: line_type_checked_at&.iso8601,
         invalid_reason: invalid_reason,
         invalidated_at: invalidated_at&.iso8601,
+        user_marked_valid_at: user_marked_valid_at&.iso8601,
         created_at: created_at&.iso8601, updated_at: updated_at&.iso8601,
         lists: lists
       }.compact
@@ -208,6 +210,28 @@ module Sendly
     def mark_valid(id)
       response = @client.post("/contacts/#{id}/mark-valid", {})
       Contact.new(response)
+    end
+
+    # Clear the invalid flag on many contacts at once — the escape hatch for
+    # when auto-flag misclassifies at scale. Pass either an explicit id array
+    # (up to 10,000 per call) OR a list_id, not both. Foreign ids silently
+    # no-op via the per-organization filter.
+    #
+    # @param ids [Array<String>, nil] Explicit contact ids to clear
+    # @param list_id [String, nil] Clear every flagged member of this list
+    # @return [Hash] `{ cleared: Integer }` — number of contacts whose flag was
+    #   actually cleared. Already-clean contacts and foreign ids don't count.
+    def bulk_mark_valid(ids: nil, list_id: nil)
+      if ids.nil? && list_id.nil?
+        raise ArgumentError, "bulk_mark_valid requires either :ids or :list_id"
+      end
+      if ids && list_id
+        raise ArgumentError, "bulk_mark_valid accepts :ids OR :list_id, not both"
+      end
+
+      body = ids ? { ids: ids } : { listId: list_id }
+      response = @client.post("/contacts/bulk-mark-valid", body)
+      { cleared: response["cleared"] || 0 }
     end
 
     # Trigger a background carrier lookup across your contacts. Landlines

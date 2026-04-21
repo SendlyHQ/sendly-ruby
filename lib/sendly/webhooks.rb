@@ -34,6 +34,40 @@ module Sendly
   module Webhooks
     SIGNATURE_TOLERANCE_SECONDS = 300
 
+    # Webhook event type string constants. Use these when subscribing
+    # instead of string literals so you catch typos at load time.
+    EVENT_MESSAGE_QUEUED                = "message.queued"
+    EVENT_MESSAGE_SENT                  = "message.sent"
+    EVENT_MESSAGE_DELIVERED             = "message.delivered"
+    EVENT_MESSAGE_FAILED                = "message.failed"
+    EVENT_MESSAGE_BOUNCED               = "message.bounced"
+    EVENT_MESSAGE_RETRYING              = "message.retrying"
+    EVENT_MESSAGE_RECEIVED              = "message.received"
+    EVENT_MESSAGE_OPT_OUT               = "message.opt_out"
+    EVENT_MESSAGE_OPT_IN                = "message.opt_in"
+    EVENT_VERIFICATION_CREATED          = "verification.created"
+    EVENT_VERIFICATION_DELIVERED        = "verification.delivered"
+    EVENT_VERIFICATION_VERIFIED         = "verification.verified"
+    EVENT_VERIFICATION_EXPIRED          = "verification.expired"
+    EVENT_VERIFICATION_FAILED           = "verification.failed"
+    EVENT_VERIFICATION_RESENT           = "verification.resent"
+    EVENT_VERIFICATION_DELIVERY_FAILED  = "verification.delivery_failed"
+    EVENT_CONTACT_AUTO_FLAGGED          = "contact.auto_flagged"
+    EVENT_CONTACT_MARKED_VALID          = "contact.marked_valid"
+    EVENT_CONTACTS_LOOKUP_COMPLETED     = "contacts.lookup_completed"
+    EVENT_CONTACTS_BULK_MARKED_VALID    = "contacts.bulk_marked_valid"
+
+    # Source of a list-health event. Frozen enum — new values will be
+    # added in minor SDK versions, never removed.
+    module ListHealthEventSource
+      SEND_FAILURE    = "send_failure"
+      CARRIER_LOOKUP  = "carrier_lookup"
+      USER_ACTION     = "user_action"
+      BULK_MARK_VALID = "bulk_mark_valid"
+
+      ALL = [SEND_FAILURE, CARRIER_LOOKUP, USER_ACTION, BULK_MARK_VALID].freeze
+    end
+
     class << self
       # Verify webhook signature from Sendly.
       #
