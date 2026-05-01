@@ -110,6 +110,56 @@ module Sendly
       @client.post("/webhooks/#{webhook_id}/reset-circuit")
     end
 
+    # Replay failed or cancelled webhook deliveries from the audit log.
+    #
+    # Use after a customer endpoint has recovered from an outage to re-fire
+    # deliveries we recorded but couldn't deliver. Each replay creates a new
+    # delivery row preserving the original event_id so customers can dedupe.
+    # Rejects with HTTP 409 if the circuit is currently open — call
+    # {#reset_circuit} first.
+    #
+    # @param webhook_id [String] Webhook ID
+    # @param since [String, nil] ISO-8601, default now − 24h
+    # @param until_ [String, nil] ISO-8601, default now
+    # @param event_types [Array<String>, nil] Filter by event type
+    # @param statuses [Array<String>, nil] Default ["failed", "cancelled"]
+    # @param limit [Integer, nil] Max deliveries to requeue (default 1000, max 10000)
+    # @return [Hash] Counts of requeued deliveries plus delivery IDs
+    def redeliver(webhook_id, since: nil, until_: nil, event_types: nil, statuses: nil, limit: nil)
+      validate_webhook_id!(webhook_id)
+      body = {}
+      body[:since] = since unless since.nil?
+      body[:until] = until_ unless until_.nil?
+      body[:event_types] = event_types unless event_types.nil?
+      body[:statuses] = statuses unless statuses.nil?
+      body[:limit] = limit unless limit.nil?
+      @client.post("/webhooks/#{webhook_id}/redeliver", body)
+    end
+
+    # Backfill missed webhook events from the underlying message log.
+    #
+    # Use when a circuit-breaker outage left events with no audit row (the
+    # case {#redeliver} cannot recover). Synthesized events have fresh IDs;
+    # clients should dedupe by event.data.object.id (the message ID).
+    # Rejects with HTTP 409 if the circuit is currently open — call
+    # {#reset_circuit} first.
+    #
+    # @param webhook_id [String] Webhook ID
+    # @param since [String, nil] ISO-8601, default now − 24h
+    # @param until_ [String, nil] ISO-8601, default now
+    # @param event_types [Array<String>, nil] Filter by event type
+    # @param limit [Integer, nil] Max events to synthesize (default 1000, max 10000)
+    # @return [Hash] Counts grouped by event type plus delivery IDs
+    def backfill(webhook_id, since: nil, until_: nil, event_types: nil, limit: nil)
+      validate_webhook_id!(webhook_id)
+      body = {}
+      body[:since] = since unless since.nil?
+      body[:until] = until_ unless until_.nil?
+      body[:event_types] = event_types unless event_types.nil?
+      body[:limit] = limit unless limit.nil?
+      @client.post("/webhooks/#{webhook_id}/backfill", body)
+    end
+
     # Rotate the webhook signing secret
     #
     # @param webhook_id [String] Webhook ID
