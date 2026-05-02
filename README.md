@@ -258,6 +258,35 @@ rotation = client.webhooks.rotate_secret("whk_xxx")
 client.webhooks.delete("whk_xxx")
 ```
 
+### Recovering Missed Events
+
+After an outage (your endpoint was down, or our circuit breaker opened),
+two methods recover what was missed:
+
+```ruby
+# Redeliver: re-send failed deliveries already in the audit log.
+redeliver = client.webhooks.redeliver("whk_xxx",
+  since: "2026-05-01T00:00:00Z",
+  until: "2026-05-01T18:00:00Z",
+  event_types: ["message.delivered", "message.failed"],
+  limit: 5000
+)
+puts "Queued #{redeliver.queued} retries"
+
+# Backfill: synthesize deliveries for messages whose events never created
+# a delivery row in the first place (silent-drop case).
+backfill = client.webhooks.backfill("whk_xxx",
+  since: "2026-05-01T00:00:00Z",
+  event_types: ["message.delivered", "message.failed"]
+)
+puts "Backfilled #{backfill.queued} events"
+```
+
+Use `redeliver` when deliveries exist but failed (5xx, timeout). Use
+`backfill` when deliveries are missing entirely (circuit was open during
+the outage). Both are idempotent — duplicate calls within the same window
+won't double-send.
+
 ## Account & Credits
 
 ```ruby
