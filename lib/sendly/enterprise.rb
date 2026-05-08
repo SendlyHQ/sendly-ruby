@@ -31,23 +31,75 @@ module Sendly
       @client.delete("/enterprise/workspaces/#{workspace_id}")
     end
 
-    def submit_verification(workspace_id, business_name:, business_type:, ein:, address:, city:, state:, zip:, use_case:, sample_messages:, monthly_volume: nil)
+    # Submit (or resubmit) a verification for an enterprise workspace.
+    #
+    # Partial-update friendly (May 2026): for resubmit on an existing
+    # workspace, you only need to send the fields you want to change —
+    # everything else is preserved from the existing record. Hosted page
+    # URLs (/biz/, /opt-in/, /legal/) generated during provision are
+    # auto-preserved.
+    #
+    # For sole proprietors, leave brn/brn_type/brn_country nil — the
+    # server strips them before forwarding to the carrier.
+    #
+    # Accepts snake_case keyword arguments which are transformed to the
+    # camelCase keys the API expects. Nested +address+ and +contact+
+    # hashes should already use camelCase keys (e.g. +firstName+,
+    # +lastName+) since they are passed through verbatim.
+    #
+    # Example (full submit):
+    #
+    #   client.enterprise.workspaces.submit_verification(workspace_id,
+    #     business_name: "Acme LLC",
+    #     website: "https://acme.com",
+    #     address: { street: "...", city: "...", state: "California", zip: "90001", country: "US" },
+    #     contact: { firstName: "...", lastName: "...", email: "...", phone: "+15551234567" },
+    #     use_case: "Insurance Services",
+    #     use_case_summary: "...",
+    #     sample_messages: "...",
+    #     opt_in_workflow: "...",
+    #     entity_type: "SOLE_PROPRIETOR")
+    #
+    # Example (partial-update resubmit, only changing email):
+    #
+    #   client.enterprise.workspaces.submit_verification(workspace_id,
+    #     contact: { email: "new@email.com" })
+    def submit_verification(workspace_id, business_name: nil, doing_business_as: nil, website: nil, entity_type: nil, address: nil, contact: nil, brn: nil, brn_type: nil, brn_country: nil, use_case: nil, use_case_summary: nil, sample_messages: nil, opt_in_workflow: nil, opt_in_image_urls: nil, monthly_volume: nil, additional_information: nil, age_gated_content: nil, isv_reseller: nil, privacy_url: nil, terms_url: nil)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
 
-      body = {
-        business_name: business_name,
-        business_type: business_type,
-        ein: ein,
-        address: address,
-        city: city,
-        state: state,
-        zip: zip,
-        use_case: use_case,
-        sample_messages: sample_messages
-      }
-      body[:monthly_volume] = monthly_volume if monthly_volume
+      body = {}
+      body[:businessName] = business_name unless business_name.nil?
+      body[:doingBusinessAs] = doing_business_as unless doing_business_as.nil?
+      body[:website] = website unless website.nil?
+      body[:entityType] = entity_type unless entity_type.nil?
+      body[:address] = address unless address.nil?
+      body[:contact] = contact unless contact.nil?
+      body[:brn] = brn unless brn.nil?
+      body[:brnType] = brn_type unless brn_type.nil?
+      body[:brnCountry] = brn_country unless brn_country.nil?
+      body[:useCase] = use_case unless use_case.nil?
+      body[:useCaseSummary] = use_case_summary unless use_case_summary.nil?
+      body[:sampleMessages] = sample_messages unless sample_messages.nil?
+      body[:optInWorkflow] = opt_in_workflow unless opt_in_workflow.nil?
+      body[:optInImageUrls] = opt_in_image_urls unless opt_in_image_urls.nil?
+      body[:monthlyVolume] = monthly_volume unless monthly_volume.nil?
+      body[:additionalInformation] = additional_information unless additional_information.nil?
+      body[:ageGatedContent] = age_gated_content unless age_gated_content.nil?
+      body[:isvReseller] = isv_reseller unless isv_reseller.nil?
+      body[:privacyUrl] = privacy_url unless privacy_url.nil?
+      body[:termsUrl] = terms_url unless terms_url.nil?
 
       @client.post("/enterprise/workspaces/#{workspace_id}/verification/submit", body)
+    end
+
+    # Convenience alias for resubmits. Identical to +submit_verification+
+    # but reads more naturally when you only want to update a few fields
+    # after a rejection.
+    #
+    #   client.enterprise.workspaces.resubmit_verification(workspace_id,
+    #     contact: { email: "new@email.com" })
+    def resubmit_verification(workspace_id, **partial_updates)
+      submit_verification(workspace_id, **partial_updates)
     end
 
     def inherit_verification(workspace_id, source_workspace_id:)
