@@ -164,16 +164,16 @@ scheduled = client.messages.schedule(
 puts scheduled.id
 puts scheduled.scheduled_at
 
-# List scheduled messages
+# List scheduled messages (returns a Hash with "data" array)
 result = client.messages.list_scheduled
-result.data.each { |msg| puts "#{msg.id}: #{msg.scheduled_at}" }
+result["data"].each { |msg| puts "#{msg['id']}: #{msg['scheduledAt']}" }
 
 # Get a specific scheduled message
 msg = client.messages.get_scheduled("sched_xxx")
 
 # Cancel a scheduled message (refunds credits)
 result = client.messages.cancel_scheduled("sched_xxx")
-puts "Refunded: #{result.credits_refunded} credits"
+puts "Refunded: #{result['creditsRefunded']} credits"
 ```
 
 ### Batch Messages
@@ -188,10 +188,10 @@ batch = client.messages.send_batch(
   ]
 )
 
-puts batch.batch_id
-puts "Queued: #{batch.queued}"
-puts "Failed: #{batch.failed}"
-puts "Credits used: #{batch.credits_used}"
+puts batch["batchId"]
+puts "Queued: #{batch['queued']}"
+puts "Failed: #{batch['failed']}"
+puts "Credits used: #{batch['creditsUsed']}"
 
 # Get batch status
 status = client.messages.get_batch("batch_xxx")
@@ -206,8 +206,8 @@ preview = client.messages.preview_batch(
     { to: '+447700900123', text: 'Hello UK!' }
   ]
 )
-puts "Total credits needed: #{preview.total_credits}"
-puts "Valid: #{preview.valid}, Invalid: #{preview.invalid}"
+puts "Credits needed: #{preview['creditsNeeded']}"
+puts "Will send: #{preview['willSend']}, Blocked: #{preview['blocked']}"
 ```
 
 ### Iterate All Messages
@@ -266,30 +266,26 @@ account = client.account.get
 puts account.email
 
 # Check credit balance
-credits = client.account.get_credits
-puts "Available: #{credits.available_balance} credits"
-puts "Reserved: #{credits.reserved_balance} credits"
-puts "Total: #{credits.balance} credits"
+credits = client.account.credits
+puts "Available: #{credits['availableBalance']} credits"
+puts "Reserved: #{credits['reservedBalance']} credits"
+puts "Total: #{credits['balance']} credits"
 
 # View credit transaction history
-result = client.account.get_credit_transactions
-result.data.each do |tx|
-  puts "#{tx.type}: #{tx.amount} credits - #{tx.description}"
+transactions = client.account.transactions
+transactions.each do |tx|
+  puts "#{tx['type']}: #{tx['amount']} credits - #{tx['description']}"
 end
 
 # List API keys
-result = client.account.list_api_keys
-result.data.each do |key|
-  puts "#{key.name}: #{key.prefix}*** (#{key.type})"
+keys = client.account.api_keys
+keys.each do |key|
+  puts "#{key['name']}: #{key['prefix']}*** (#{key['type']})"
 end
 
 # Create a new API key
-new_key = client.account.create_api_key(
-  name: 'Production Key',
-  type: 'live',
-  scopes: ['sms:send', 'sms:read']
-)
-puts "New key: #{new_key.key}"  # Only shown once!
+result = client.account.create_api_key('Production Key')
+puts "New key: #{result['key']}"  # Only shown once!
 
 # Revoke an API key
 client.account.revoke_api_key('key_xxx')
@@ -408,7 +404,7 @@ Three provisioning modes:
 ### Workspace Management
 
 ```ruby
-ws = client.enterprise.workspaces.create("Acme Insurance")
+ws = client.enterprise.workspaces.create(name: "Acme Insurance")
 list = client.enterprise.workspaces.list
 detail = client.enterprise.workspaces.get("ws_xxx")
 client.enterprise.workspaces.delete("ws_xxx")
@@ -430,7 +426,7 @@ client.enterprise.workspaces.revoke_key("ws_xxx", "key_abc")
 ### Webhooks & Analytics
 
 ```ruby
-client.enterprise.webhooks.set("https://yourapp.com/webhooks")
+client.enterprise.webhooks.set(url: "https://yourapp.com/webhooks")
 overview = client.enterprise.analytics.overview
 messages = client.enterprise.analytics.messages(period: "30d")
 delivery = client.enterprise.analytics.delivery
