@@ -1,5 +1,22 @@
 # sendly (Ruby)
 
+## 3.31.0
+
+### Patch Changes
+
+- **`Sendly::Client.new` now accepts the API key positionally** in addition to as a keyword argument. Every code sample in our docs used positional, so `Sendly::Client.new("sk_live_...")` previously raised `ArgumentError: missing keyword: :api_key`. Both styles now work and produce identical clients:
+
+  ```ruby
+  # Positional (matches our docs)
+  client = Sendly::Client.new("sk_live_v1_xxx")
+  client = Sendly::Client.new("sk_live_v1_xxx", timeout: 60)
+
+  # Keyword (existing v3.30.0 signature — unchanged)
+  client = Sendly::Client.new(api_key: "sk_live_v1_xxx")
+  ```
+
+  Passing `api_key` both positionally and as a keyword raises `ArgumentError`; passing more than one positional argument also raises. Backward-compatible with all v3.30.0 callers.
+
 ## 3.30.0
 
 ### Minor Changes

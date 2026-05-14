@@ -18,6 +18,31 @@ RSpec.describe Sendly::Client do
         expect(client.api_key).to eq('sk_live_v1_xyz789')
       end
 
+      # v3.31.0: positional api_key support (matches our published docs)
+      it 'accepts api_key positionally' do
+        client = Sendly::Client.new('sk_test_v1_positional')
+        expect(client.api_key).to eq('sk_test_v1_positional')
+      end
+
+      it 'accepts api_key positionally with keyword options' do
+        client = Sendly::Client.new('sk_test_v1_positional', timeout: 60, max_retries: 5)
+        expect(client.api_key).to eq('sk_test_v1_positional')
+        expect(client.timeout).to eq(60)
+        expect(client.max_retries).to eq(5)
+      end
+
+      it 'raises if api_key is passed both positionally and as keyword' do
+        expect do
+          Sendly::Client.new('sk_test_v1_pos', api_key: 'sk_test_v1_kw')
+        end.to raise_error(ArgumentError, /both positionally and as keyword/)
+      end
+
+      it 'raises if more than one positional argument is given' do
+        expect do
+          Sendly::Client.new('sk_test_v1_a', 'sk_test_v1_b')
+        end.to raise_error(ArgumentError, /at most one positional argument/)
+      end
+
       it 'accepts custom base_url' do
         client = Sendly::Client.new(
           api_key: 'sk_test_v1_abc123',

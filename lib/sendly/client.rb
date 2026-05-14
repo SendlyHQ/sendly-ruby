@@ -23,18 +23,33 @@ module Sendly
     # @return [String, nil] Organization ID
     attr_accessor :organization_id
 
-    # Create a new Sendly client
+    # Create a new Sendly client.
     #
-    # @param api_key [String] Your Sendly API key
-    # @param base_url [String] API base URL (optional)
+    # Two calling conventions are supported (both produce the same client):
+    #
+    #   # Positional (matches Sendly's published code samples and the
+    #   # idiom of most other Ruby HTTP SDKs):
+    #   client = Sendly::Client.new("sk_live_v1_xxx")
+    #   client = Sendly::Client.new("sk_live_v1_xxx", timeout: 60)
+    #
+    #   # Keyword (existing v3.30.0 signature):
+    #   client = Sendly::Client.new(api_key: "sk_live_v1_xxx")
+    #
+    # @param api_key [String, nil] Your Sendly API key (also accepted as positional)
+    # @param base_url [String, nil] API base URL (optional)
     # @param timeout [Integer] Request timeout in seconds (default: 30)
     # @param max_retries [Integer] Maximum retry attempts (default: 3)
     # @param organization_id [String, nil] Organization ID (optional)
-    #
-    # @example
-    #   client = Sendly::Client.new("sk_live_v1_xxx")
-    #   client = Sendly::Client.new("sk_live_v1_xxx", timeout: 60, max_retries: 5)
-    def initialize(api_key:, base_url: nil, timeout: 30, max_retries: 3, organization_id: nil)
+    def initialize(*args, api_key: nil, base_url: nil, timeout: 30, max_retries: 3, organization_id: nil)
+      # Backward-compatible positional API key. Previously this constructor
+      # only accepted `api_key:` as a keyword; every code sample in our
+      # docs used positional, breaking copy-paste for new users.
+      if !args.empty?
+        raise ArgumentError, "Sendly::Client.new accepts at most one positional argument (api_key)" if args.length > 1
+        raise ArgumentError, "Cannot pass api_key both positionally and as keyword" unless api_key.nil?
+        api_key = args.first
+      end
+
       @api_key = api_key
       @base_url = (base_url || Sendly.base_url).chomp("/")
       @timeout = timeout
