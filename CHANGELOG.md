@@ -1,5 +1,47 @@
 # sendly (Ruby)
 
+## 3.32.0
+
+### Minor Changes
+
+- New `business_upgrade` resource for the toll-free entity-upgrade ("fork-with-new-number") flow. When a customer forms a new legal entity (e.g. an LLC), this resource lets them reserve a new toll-free number under the new entity, submit it for carrier review, and atomically swap to it on approval — without disrupting outbound SMS during the 1-2 week review window. Mirrors the Node SDK's `businessUpgrade` resource at parity.
+
+  ```ruby
+  client = Sendly::Client.new("sk_live_v1_xxx")
+
+  # Validate before submitting (no writes)
+  preview = client.business_upgrade.preflight(
+    business_name: "Acme Holdings LLC",
+    brn: "12-3456789",
+    brn_type: "EIN",
+    brn_country: "US",
+    entity_type: "PRIVATE_PROFIT"
+  )
+
+  # Best-of prefill across all the caller's verified workspaces
+  prefill = client.business_upgrade.best_prefill
+
+  # Submit the upgrade with the IRS letter (multipart upload)
+  result = client.business_upgrade.start(
+    "ws_abc",
+    business_name: "Acme Holdings LLC",
+    brn: "12-3456789",
+    brn_type: "EIN",
+    brn_country: "US",
+    entity_type: "PRIVATE_PROFIT",
+    ein_doc_path: "./CP-575.pdf"
+  )
+
+  # Status, cancel, resubmit, set old-number disposition
+  client.business_upgrade.status("ws_abc")
+  client.business_upgrade.cancel("ws_abc")
+  client.business_upgrade.resubmit("ws_abc", contact_email: "new@acme.com")
+  client.business_upgrade.set_disposition("ws_abc", disposition: "released")
+  client.business_upgrade.set_disposition("ws_abc", disposition: "moved", target_workspace_id: "ws_xyz")
+  ```
+
+  Methods: `preflight`, `best_prefill`, `start`, `status`, `cancel`, `resubmit`, `set_disposition`. EIN PDFs can be passed via `ein_doc_path:` (file path) or `ein_doc:` (raw bytes / IO).
+
 ## 3.31.0
 
 ### Patch Changes

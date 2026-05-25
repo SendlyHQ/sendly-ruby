@@ -150,6 +150,13 @@ module Sendly
       @enterprise ||= EnterpriseResource.new(self)
     end
 
+    # Access the Business Upgrade resource (entity-upgrade flow)
+    #
+    # @return [Sendly::BusinessUpgradeResource]
+    def business_upgrade
+      @business_upgrade ||= BusinessUpgradeResource.new(self)
+    end
+
     # Make a GET request
     #
     # @param path [String] API path

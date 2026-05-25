@@ -21,6 +21,7 @@ require_relative "sendly/labels_resource"
 require_relative "sendly/drafts_resource"
 require_relative "sendly/rules_resource"
 require_relative "sendly/enterprise"
+require_relative "sendly/business_upgrade_resource"
 
 # Sendly Ruby SDK
 #
