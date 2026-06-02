@@ -291,6 +291,47 @@ puts "New key: #{result['key']}"  # Only shown once!
 client.account.revoke_api_key('key_xxx')
 ```
 
+## Numbers
+
+Search for, list, and purchase phone numbers. Requires an API key with the
+`numbers:read` / `numbers:write` scopes.
+
+```ruby
+# List supported countries and the number types available in each
+client.numbers.list_countries[:countries].each do |country|
+  puts "#{country.code} #{country.name}: #{country.number_types.join(', ')}"
+end
+
+# Find available numbers (monthly_cost is already customer-priced)
+result = client.numbers.list_available(country: 'GB', type: 'mobile', contains: '777')
+number = result[:numbers].first
+puts "#{number.phone_number} — #{number.monthly_cost} #{number.currency}/mo"
+
+# List numbers you already own
+client.numbers.list[:numbers].each do |n|
+  puts "#{n.phone_number} (#{n.status})"
+end
+
+# Buy a number
+purchase = client.numbers.buy(
+  phone_number: number.phone_number,
+  country_code: number.country,
+  phone_number_type: number.number_type,
+  monthly_cost: number.monthly_cost
+)
+
+case purchase.status
+when 'provisioning'
+  puts "Provisioning #{purchase.number.phone_number}"
+when 'documents_required', 'payment_required'
+  # Hand the user the hosted page + code, wait for them to finish, then
+  # re-call buy with the SAME arguments plus the completed action's code.
+  puts "Visit #{purchase.action_url} and enter code #{purchase.action_code}"
+  # ...after the action completes:
+  # client.numbers.buy(..., action_code: purchase.action_code)
+end
+```
+
 ## Error Handling
 
 ```ruby

@@ -157,6 +157,13 @@ module Sendly
       @business_upgrade ||= BusinessUpgradeResource.new(self)
     end
 
+    # Access the Numbers resource
+    #
+    # @return [Sendly::NumbersResource]
+    def numbers
+      @numbers ||= NumbersResource.new(self)
+    end
+
     # Make a GET request
     #
     # @param path [String] API path
