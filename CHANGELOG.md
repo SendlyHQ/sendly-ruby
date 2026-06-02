@@ -1,5 +1,20 @@
 # sendly (Ruby)
 
+## 3.33.0
+
+### Minor Changes
+
+- New `client.conversations.suggest_replies(id)` method — `POST /api/v1/conversations/:id/suggest-replies`. Returns AI-generated reply suggestions for a conversation based on its recent message history, mirroring the Node SDK's `conversations.suggestReplies()` and the equivalent methods on the other Sendly SDKs (closes a feature parity gap). Returns a `Sendly::SuggestRepliesResponse`, which is `Enumerable` over its `SuggestedReply` entries and also exposes `#suggestions`, `#based_on_message_id`, and `#model`.
+
+  ```ruby
+  client = Sendly::Client.new("sk_live_v1_xxx")
+
+  result = client.conversations.suggest_replies("conv_abc123")
+  result.suggestions.each do |reply|
+    puts "[#{reply.tone}] #{reply.text}"
+  end
+  ```
+
 ## 3.32.0
 
 ### Minor Changes

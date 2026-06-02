@@ -597,6 +597,75 @@ module Sendly
   end
 
   # ============================================================================
+  # Suggested Replies
+  # ============================================================================
+
+  class SuggestedReply
+    # @return [String] Suggested reply text
+    attr_reader :text
+
+    # @return [String] Tone of the suggestion (professional, friendly, concise)
+    attr_reader :tone
+
+    TONES = %w[professional friendly concise].freeze
+
+    def initialize(data)
+      @text = data["text"]
+      @tone = data["tone"]
+    end
+
+    def to_h
+      { text: text, tone: tone }.compact
+    end
+  end
+
+  class SuggestRepliesResponse
+    include Enumerable
+
+    # @return [Array<SuggestedReply>] AI-generated reply suggestions
+    attr_reader :suggestions
+
+    # @return [String, nil] ID of the inbound message the suggestions are based on
+    attr_reader :based_on_message_id
+
+    # @return [String, nil] Model that generated the suggestions
+    attr_reader :model
+
+    def initialize(data)
+      @suggestions = (data["suggestions"] || []).map { |s| SuggestedReply.new(s) }
+      @based_on_message_id = data["basedOnMessageId"] || data["based_on_message_id"]
+      @model = data["model"]
+    end
+
+    def each(&block)
+      suggestions.each(&block)
+    end
+
+    def count
+      suggestions.length
+    end
+
+    alias size count
+    alias length count
+
+    def empty?
+      suggestions.empty?
+    end
+
+    def first
+      suggestions.first
+    end
+
+    def to_h
+      {
+        suggestions: suggestions.map(&:to_h),
+        based_on_message_id: based_on_message_id,
+        model: model
+      }.compact
+    end
+  end
+
+  # ============================================================================
   # Labels
   # ============================================================================
 

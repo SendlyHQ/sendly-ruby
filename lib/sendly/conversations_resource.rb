@@ -107,6 +107,14 @@ module Sendly
       ConversationContext.new(response)
     end
 
+    def suggest_replies(id)
+      raise ValidationError, "Conversation ID is required" if id.nil? || id.empty?
+
+      encoded_id = URI.encode_www_form_component(id)
+      response = @client.post("/conversations/#{encoded_id}/suggest-replies")
+      SuggestRepliesResponse.new(response)
+    end
+
     def each(status: nil, batch_size: 100, &block)
       return enum_for(:each, status: status, batch_size: batch_size) unless block_given?
 
