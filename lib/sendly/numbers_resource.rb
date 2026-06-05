@@ -42,7 +42,14 @@ module Sendly
   # A number owned by the account.
   class PhoneNumber
     attr_reader :id, :phone_number, :status, :source, :country_code,
-                :phone_number_type, :monthly_cost_cents
+                :phone_number_type, :monthly_cost_cents,
+                # ISO-8601 timestamp string, or nil when the number still needs
+                # regulatory documents (a value means docs are under carrier review).
+                :requirements_submitted_at,
+                # true when the number is scheduled for release at period end.
+                :pending_cancellation,
+                # ISO-8601 timestamp string, or nil when no release is scheduled.
+                :scheduled_release_at
 
     def initialize(data)
       @id = data["id"]
@@ -52,13 +59,19 @@ module Sendly
       @country_code = data["countryCode"] || data["country_code"]
       @phone_number_type = data["phoneNumberType"] || data["phone_number_type"]
       @monthly_cost_cents = data["monthlyCostCents"] || data["monthly_cost_cents"]
+      @requirements_submitted_at = data["requirementsSubmittedAt"] || data["requirements_submitted_at"]
+      @pending_cancellation = data.key?("pendingCancellation") ? data["pendingCancellation"] : data["pending_cancellation"]
+      @scheduled_release_at = data["scheduledReleaseAt"] || data["scheduled_release_at"]
     end
 
     def to_h
       {
         id: id, phone_number: phone_number, status: status, source: source,
         country_code: country_code, phone_number_type: phone_number_type,
-        monthly_cost_cents: monthly_cost_cents
+        monthly_cost_cents: monthly_cost_cents,
+        requirements_submitted_at: requirements_submitted_at,
+        pending_cancellation: pending_cancellation,
+        scheduled_release_at: scheduled_release_at
       }.compact
     end
   end
