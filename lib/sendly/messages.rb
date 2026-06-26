@@ -14,6 +14,7 @@ module Sendly
     #
     # @param to [String] Recipient phone number in E.164 format
     # @param text [String] Message content (max 1600 characters)
+    # @param from [String] Sender ID or phone number (optional)
     # @param message_type [String] Message type: "marketing" (default) or "transactional"
     # @param metadata [Hash] Custom JSON metadata to attach to the message (max 4KB)
     # @return [Sendly::Message] The sent message
@@ -36,11 +37,12 @@ module Sendly
     #     text: "Your verification code is 123456",
     #     message_type: "transactional"
     #   )
-    def send(to:, text:, message_type: nil, metadata: nil, media_urls: nil)
+    def send(to:, text:, from: nil, message_type: nil, metadata: nil, media_urls: nil)
       validate_phone!(to)
       validate_text!(text)
 
       body = { to: to, text: text }
+      body[:from] = from if from
       body[:messageType] = message_type if message_type
       body[:metadata] = metadata if metadata
       body[:mediaUrls] = media_urls if media_urls
