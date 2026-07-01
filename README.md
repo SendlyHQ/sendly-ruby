@@ -340,6 +340,53 @@ when 'documents_required', 'payment_required'
 end
 ```
 
+## 10DLC (Local Number Texting)
+
+Register your business for carrier review so you can text from local
+(10-digit) US numbers. Requires an API key with the `tendlc:read` /
+`tendlc:write` scopes; writes need a live key.
+
+```ruby
+# 1. Register a brand for carrier review
+brand = client.ten_dlc.create_brand(
+  legal_name: 'Acme Holdings LLC',
+  ein: '12-3456789',
+  website: 'https://acme.example',
+  email: 'ops@acme.example'
+)
+
+# Poll until the brand is verified (or failed, with failure_reasons)
+refreshed = client.ten_dlc.get_brand(brand.id)
+puts refreshed.status  # "pending" -> "verified"
+
+# 2. Pre-check your use case, then create a campaign
+check = client.ten_dlc.qualify(brand.id, 'MIXED')
+if check.qualified?
+  campaign = client.ten_dlc.create_campaign(
+    brand_id: brand.id,
+    use_case: 'MIXED',
+    description: 'Order updates and support replies for Acme customers',
+    message_flow: 'Customers opt in at checkout on acme.example',
+    sample_messages: ['Your order #123 has shipped!'],
+    opt_out_keywords: 'STOP'
+  )
+
+  # Poll until carriers approve
+  approved = client.ten_dlc.get_campaign(campaign.id)
+  puts approved.status            # "pending" -> "active"
+  puts approved.throughput&.tier  # e.g. "Standard"
+
+  # 3. Assign a number you own — it can send once the assignment is Active
+  assignment = client.ten_dlc.assign_number(campaign.id, phone_number: '+15551234567')
+  puts assignment.status  # "Under review" -> "Active"
+end
+
+# List everything
+client.ten_dlc.list_brands[:brands].each { |b| puts "#{b.legal_name} — #{b.status}" }
+client.ten_dlc.list_campaigns[:campaigns].each { |c| puts "#{c.use_case} — #{c.status}" }
+client.ten_dlc.list_assignments[:assignments].each { |a| puts "#{a.phone_number} — #{a.status}" }
+```
+
 ## Error Handling
 
 ```ruby

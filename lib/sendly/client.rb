@@ -164,6 +164,13 @@ module Sendly
       @numbers ||= NumbersResource.new(self)
     end
 
+    # Access the 10DLC resource
+    #
+    # @return [Sendly::TenDlcResource]
+    def ten_dlc
+      @ten_dlc ||= TenDlcResource.new(self)
+    end
+
     # Make a GET request
     #
     # @param path [String] API path
