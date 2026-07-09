@@ -52,6 +52,89 @@ module Sendly
       Message.new(response)
     end
 
+    # Send a group MMS to 2-8 recipients (US/Canada only)
+    #
+    # Creates a multi-party MMS conversation: every recipient sees the others,
+    # and replies fan out to all participants. Group messaging is an A2P 10DLC
+    # capability — the sending number must be an MMS-enabled, 10DLC-registered
+    # number you own. Omit +from+ to use your workspace's default sender.
+    # Requires the +group_mms+ feature (and +enable_mms+ when sending media).
+    #
+    # @param to [Array<String>] 2-8 recipient phone numbers in E.164 format (US/CA only)
+    # @param text [String] Message content (required unless media_urls is provided)
+    # @param from [String] Sender ID or phone number (optional)
+    # @param media_urls [Array<String>] Media URLs to attach (required unless text is provided)
+    # @param message_type [String] Message type: "transactional" (default) or "marketing"
+    # @return [Sendly::GroupMessage] The sent group message, including a group_message_id
+    #
+    # @raise [Sendly::ValidationError] If fewer than 2 / more than 8 recipients, or no body
+    # @raise [Sendly::InsufficientCreditsError] If credit balance is too low (billed per recipient)
+    #
+    # @example
+    #   group = client.messages.send_group(
+    #     to: ["+14155551234", "+14155555678"],
+    #     text: "Hey team - quick sync at noon?"
+    #   )
+    #   puts group.id
+    #   puts group.group_message_id
+    def send_group(to:, text: nil, from: nil, media_urls: nil, message_type: nil)
+      unless to.is_a?(Array) && to.length >= 2
+        raise ValidationError, "Group messaging requires at least 2 recipients in 'to'"
+      end
+      raise ValidationError, "Group messaging supports at most 8 recipients" if to.length > 8
+
+      to.each { |recipient| validate_phone!(recipient) }
+
+      has_media = media_urls.is_a?(Array) && !media_urls.empty?
+      raise ValidationError, "Provide 'text' or 'media_urls'" if (text.nil? || text.empty?) && !has_media
+
+      body = { to: to }
+      body[:text] = text if text && !text.empty?
+      body[:from] = from if from
+      body[:mediaUrls] = media_urls if has_media
+      body[:messageType] = message_type if message_type
+
+      response = client.post("/messages/group", body)
+      GroupMessage.new(response)
+    end
+
+    # AI-enhance a draft message for clarity, compliance, and send-readiness
+    #
+    # Rewrites the supplied text into a single, polished SMS segment (<=160
+    # chars) and returns a short explanation of what changed. Pass +message_type+
+    # to steer the rewrite (e.g. "marketing" vs "transactional"); with no +text+
+    # it generates a suitable message for that type instead. At least one of
+    # +text+ or +message_type+ is required. Requires the +ai_classification+
+    # feature. When AI enhancement is unavailable, the response falls back to the
+    # original text with an empty explanation.
+    #
+    # @param text [String] Draft message text to rewrite (optional if message_type given)
+    # @param message_type [String] Message-type hint, e.g. "marketing" or "transactional"
+    # @return [Sendly::EnhancedMessage] The enhanced text, an explanation, and the model used
+    #
+    # @raise [Sendly::ValidationError] If neither text nor message_type is provided
+    # @raise [Sendly::NotFoundError] If AI enhancement is not enabled for the account
+    #
+    # @example
+    #   result = client.messages.enhance(
+    #     text: "hey come check out our sale this weekend",
+    #     message_type: "marketing"
+    #   )
+    #   puts result.enhanced     # polished, <=160-char rewrite
+    #   puts result.explanation  # what changed and why
+    def enhance(text: nil, message_type: nil)
+      if (text.nil? || text.to_s.empty?) && (message_type.nil? || message_type.to_s.empty?)
+        raise ValidationError, "Provide 'text' or 'message_type'"
+      end
+
+      body = {}
+      body[:text] = text unless text.nil?
+      body[:messageType] = message_type if message_type
+
+      response = client.post("/ai/enhance", body)
+      EnhancedMessage.new(response)
+    end
+
     # List messages
     #
     # @param limit [Integer] Maximum messages to return (default: 20, max: 100)

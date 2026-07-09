@@ -171,6 +171,13 @@ module Sendly
       @ten_dlc ||= TenDlcResource.new(self)
     end
 
+    # Access the Links resource (branded URL shortening)
+    #
+    # @return [Sendly::LinksResource]
+    def links
+      @links ||= LinksResource.new(self)
+    end
+
     # Make a GET request
     #
     # @param path [String] API path
@@ -213,6 +220,35 @@ module Sendly
     # @return [Hash] Response body
     def delete(path)
       request(:delete, path)
+    end
+
+    # Make a GET request against the API origin, bypassing the +/api/v1+ base.
+    # Used by resources whose endpoints live at the origin (e.g. the URL
+    # shortener at +/api/links+).
+    #
+    # @param path [String] Origin-relative path (e.g. "/api/links")
+    # @param params [Hash] Query parameters
+    # @return [Hash] Response body
+    def get_unversioned(path, params = {})
+      request(:get, path, params: params, unversioned: true)
+    end
+
+    # Make a POST request against the API origin, bypassing the +/api/v1+ base.
+    #
+    # @param path [String] Origin-relative path (e.g. "/api/links")
+    # @param body [Hash] Request body
+    # @return [Hash] Response body
+    def post_unversioned(path, body = {})
+      request(:post, path, body: body, unversioned: true)
+    end
+
+    # Make a PATCH request against the API origin, bypassing the +/api/v1+ base.
+    #
+    # @param path [String] Origin-relative path (e.g. "/api/links/:code")
+    # @param body [Hash] Request body
+    # @return [Hash] Response body
+    def patch_unversioned(path, body = {})
+      request(:patch, path, body: body, unversioned: true)
     end
 
     # Make a multipart POST request for file uploads
@@ -280,8 +316,8 @@ module Sendly
       end
     end
 
-    def request(method, path, params: {}, body: nil)
-      uri = build_uri(path, params)
+    def request(method, path, params: {}, body: nil, unversioned: false)
+      uri = build_uri(path, params, unversioned: unversioned)
       http = build_http(uri)
       req = build_request(method, uri, body)
 
@@ -310,8 +346,9 @@ module Sendly
       end
     end
 
-    def build_uri(path, params)
-      url = "#{base_url}#{path}"
+    def build_uri(path, params, unversioned: false)
+      base = unversioned ? api_origin : base_url
+      url = "#{base}#{path}"
       uri = URI.parse(url)
 
       if params.any?
@@ -320,6 +357,15 @@ module Sendly
       end
 
       uri
+    end
+
+    # Derive the bare API origin (scheme + host [+ non-default port]) from the
+    # configured base URL, dropping its path. Origin-level endpoints such as
+    # the URL shortener at +/api/links+ hang off this, not the +/api/v1+ base.
+    def api_origin
+      uri = URI.parse(base_url)
+      port = uri.port && uri.port != uri.default_port ? ":#{uri.port}" : ""
+      "#{uri.scheme}://#{uri.host}#{port}"
     end
 
     def build_http(uri)

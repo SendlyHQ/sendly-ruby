@@ -95,6 +95,37 @@ module Sendly
       @client.delete("/account/keys/#{key_id}")
     end
 
+    # Rotate an API key.
+    #
+    # Issues a new key that inherits the old key's scopes and type, and puts the
+    # old key into a grace period (default 24 hours; 24-168 inclusive) during
+    # which BOTH keys work — deploy the new key, then let the old one expire. The
+    # new key's raw secret is returned only once, at
+    # +result["newKey"]["key"]+; store it now.
+    #
+    # @param key_id [String] ID of the API key to rotate
+    # @param grace_period_hours [Integer, nil] Hours the old key stays valid
+    #   (24-168 inclusive; the API defaults to 24 when omitted)
+    # @return [Hash] +{ "newKey" => { ..., "key" => "sk_...", "warning" => ... }, "oldKey" => { ... }, "message" => ... }+
+    #
+    # @raise [ArgumentError] If key_id is missing
+    # @raise [Sendly::ValidationError] If grace_period_hours is outside 24-168, or the key
+    #   cannot be rotated (inactive/revoked/already-rotating/predecessor still in grace)
+    # @raise [Sendly::NotFoundError] If the key does not exist
+    #
+    # @example
+    #   result = client.account.rotate_api_key('key_xxx', grace_period_hours: 72)
+    #   puts result['newKey']['key']  # Save this — shown once!
+    #   puts result['message']        # "Old key will expire in 72 hours"
+    def rotate_api_key(key_id, grace_period_hours: nil)
+      raise ArgumentError, "API key ID is required" if key_id.nil? || key_id.empty?
+
+      body = {}
+      body[:gracePeriodHours] = grace_period_hours unless grace_period_hours.nil?
+
+      @client.post("/account/keys/#{key_id}/rotate", body)
+    end
+
     def transfer_credits(target_organization_id:, amount:)
       raise ArgumentError, "Target organization ID is required" if target_organization_id.nil? || target_organization_id.empty?
       raise ArgumentError, "Amount must be a positive integer" if !amount.is_a?(Integer) || amount <= 0

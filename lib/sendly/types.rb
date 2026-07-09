@@ -208,6 +208,85 @@ module Sendly
     end
   end
 
+  # Represents the result of sending a group MMS to 2-8 recipients.
+  #
+  # Unlike {Message}, +to+ is an array of recipients and the response carries a
+  # +group_message_id+ identifying the shared conversation. The raw parsed
+  # response is preserved on +#raw+ so callers can read any field the server
+  # adds.
+  class GroupMessage
+    # @return [String] Message id — matches the id in delivery webhooks
+    attr_reader :id
+
+    # @return [String] Delivery status ("sent" on a live send, "delivered" when simulated)
+    attr_reader :status
+
+    # @return [Array<String>] The recipients the group message was sent to
+    attr_reader :to
+
+    # @return [String, nil] Identifier for the group conversation (present on live sends)
+    attr_reader :group_message_id
+
+    # @return [Boolean] True when the send was simulated and nothing reached the carrier
+    attr_reader :simulated
+
+    # @return [String, nil] Human-readable note, present on simulated sends
+    attr_reader :message
+
+    # @return [Hash] The raw parsed response
+    attr_reader :raw
+
+    def initialize(data)
+      @raw = data
+      @id = data["id"]
+      @status = data["status"]
+      @to = data["to"] || []
+      @group_message_id = data["group_message_id"] || data["groupMessageId"]
+      @simulated = data["simulated"] || false
+      @message = data["message"]
+    end
+
+    # @return [Boolean] Whether the send was simulated
+    def simulated?
+      simulated
+    end
+
+    def to_h
+      {
+        id: id, status: status, to: to,
+        group_message_id: group_message_id,
+        simulated: simulated, message: message
+      }.compact
+    end
+  end
+
+  # Represents the result of an AI message enhancement.
+  class EnhancedMessage
+    # @return [String] The rewritten message, capped at 160 characters (one SMS
+    #   segment). Falls back to the original text when AI is unavailable.
+    attr_reader :enhanced
+
+    # @return [String] Short explanation of what changed (empty on the fallback path)
+    attr_reader :explanation
+
+    # @return [String, nil] The model that produced the enhancement, when available
+    attr_reader :model
+
+    # @return [Hash] The raw parsed response
+    attr_reader :raw
+
+    def initialize(data)
+      @raw = data
+      @enhanced = data["enhanced"]
+      @explanation = data["explanation"] || ""
+      @model = data["model"]
+    end
+
+    def to_h
+      { enhanced: enhanced, explanation: explanation, model: model }.compact
+    end
+  end
+
   # ============================================================================
   # Media
   # ============================================================================

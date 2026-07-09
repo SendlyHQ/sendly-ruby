@@ -43,6 +43,10 @@ module Sendly
   class PhoneNumber
     attr_reader :id, :phone_number, :status, :source, :country_code,
                 :phone_number_type, :monthly_cost_cents,
+                # true when this is the workspace's default sender. Only present
+                # on single-number responses ({NumbersResource#get} /
+                # {NumbersResource#update}); nil in the {NumbersResource#list} projection.
+                :is_default,
                 # ISO-8601 timestamp string, or nil when the number still needs
                 # regulatory documents (a value means docs are under carrier review).
                 :requirements_submitted_at,
@@ -59,6 +63,7 @@ module Sendly
       @country_code = data["countryCode"] || data["country_code"]
       @phone_number_type = data["phoneNumberType"] || data["phone_number_type"]
       @monthly_cost_cents = data["monthlyCostCents"] || data["monthly_cost_cents"]
+      @is_default = data.key?("isDefault") ? data["isDefault"] : data["is_default"]
       @requirements_submitted_at = data["requirementsSubmittedAt"] || data["requirements_submitted_at"]
       @pending_cancellation = data.key?("pendingCancellation") ? data["pendingCancellation"] : data["pending_cancellation"]
       @scheduled_release_at = data["scheduledReleaseAt"] || data["scheduled_release_at"]
@@ -68,7 +73,7 @@ module Sendly
       {
         id: id, phone_number: phone_number, status: status, source: source,
         country_code: country_code, phone_number_type: phone_number_type,
-        monthly_cost_cents: monthly_cost_cents,
+        monthly_cost_cents: monthly_cost_cents, is_default: is_default,
         requirements_submitted_at: requirements_submitted_at,
         pending_cancellation: pending_cancellation,
         scheduled_release_at: scheduled_release_at
@@ -156,6 +161,45 @@ module Sendly
       {
         status: status, number: number&.to_h,
         requirements: requirements, action: action
+      }.compact
+    end
+  end
+
+  # The result of releasing an owned number via {NumbersResource#release}.
+  #
+  # A live paid purchase is cancelled at the end of the paid period — the result
+  # then reports +scheduled?+ true with a +scheduled_release_at+ timestamp.
+  # Everything else is released immediately (+scheduled?+ false, no timestamp).
+  # The raw parsed response is preserved on +#raw+.
+  class NumberRelease
+    # @return [Boolean] true on success
+    attr_reader :success
+
+    # @return [Boolean] true when the release was scheduled for the period end
+    attr_reader :scheduled
+
+    # @return [String, nil] ISO-8601 timestamp the scheduled release takes effect
+    attr_reader :scheduled_release_at
+
+    # @return [Hash] The raw parsed response
+    attr_reader :raw
+
+    def initialize(data)
+      @raw = data
+      @success = data.key?("success") ? data["success"] : true
+      @scheduled = data["scheduled"] || false
+      @scheduled_release_at = data["scheduledReleaseAt"] || data["scheduled_release_at"]
+    end
+
+    # @return [Boolean] Whether the release was scheduled (vs immediate)
+    def scheduled?
+      scheduled
+    end
+
+    def to_h
+      {
+        success: success, scheduled: scheduled,
+        scheduled_release_at: scheduled_release_at
       }.compact
     end
   end
@@ -256,6 +300,68 @@ module Sendly
 
       response = @client.post("/numbers/buy", body)
       NumberPurchase.new(response)
+    end
+
+    # Get a single number owned by the account.
+    #
+    # Unlike the entries {#list} returns, this includes +is_default+ — whether
+    # the number is the workspace's default sender.
+    #
+    # @param id [String] The number's id
+    # @return [PhoneNumber]
+    # @raise [Sendly::NotFoundError] If no such number exists in your workspace
+    def get(id)
+      raise ValidationError, "id is required" if id.nil? || id.to_s.empty?
+
+      encoded_id = URI.encode_www_form_component(id)
+      response = @client.get("/numbers/#{encoded_id}")
+      PhoneNumber.new(response)
+    end
+
+    # Update a number you own. Supply at least one supported mutation — these are
+    # the only two the API supports:
+    #
+    # - +is_default: true+ — make this the workspace's default sending number
+    #   (the number must be +active+).
+    # - +pending_cancellation: false+ — cancel a previously scheduled release and
+    #   keep the number.
+    #
+    # @param id [String] The number's id
+    # @param is_default [Boolean, nil] Pass +true+ to make this the default sender
+    # @param pending_cancellation [Boolean, nil] Pass +false+ to cancel a scheduled release
+    # @return [PhoneNumber] The updated number (including +is_default+)
+    # @raise [Sendly::ValidationError] If no supported field is given, or +is_default+
+    #   is requested for a non-active number
+    # @raise [Sendly::NotFoundError] If no such number exists in your workspace
+    def update(id, is_default: nil, pending_cancellation: nil)
+      raise ValidationError, "id is required" if id.nil? || id.to_s.empty?
+      if is_default.nil? && pending_cancellation.nil?
+        raise ValidationError, "Provide is_default: true and/or pending_cancellation: false"
+      end
+
+      body = {}
+      body[:isDefault] = is_default unless is_default.nil?
+      body[:pendingCancellation] = pending_cancellation unless pending_cancellation.nil?
+
+      encoded_id = URI.encode_www_form_component(id)
+      response = @client.patch("/numbers/#{encoded_id}", body)
+      PhoneNumber.new(response)
+    end
+
+    # Release a number you own. A live paid purchase is cancelled at the end of
+    # the paid period (the result then reports +scheduled?+ true with a
+    # +scheduled_release_at+); everything else is released immediately.
+    #
+    # @param id [String] The number's id
+    # @return [NumberRelease]
+    # @raise [Sendly::NotFoundError] If no such number exists in your workspace
+    # @raise [Sendly::ValidationError] If the carrier release failed
+    def release(id)
+      raise ValidationError, "id is required" if id.nil? || id.to_s.empty?
+
+      encoded_id = URI.encode_www_form_component(id)
+      response = @client.delete("/numbers/#{encoded_id}")
+      NumberRelease.new(response)
     end
   end
 end

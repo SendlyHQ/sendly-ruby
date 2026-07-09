@@ -232,6 +232,54 @@ client.messages.each(status: "delivered") do |message|
 end
 ```
 
+### Group MMS
+
+Send one MMS to 2-8 US/Canada recipients who all share a single thread —
+replies fan out to every participant. Group messaging is an A2P 10DLC
+capability, so the sending number must be an MMS-enabled, 10DLC-registered
+number you own. Omit `from` to use your workspace's default sender. Requires
+the `group_mms` feature (and `enable_mms` when sending media).
+
+```ruby
+group = client.messages.send_group(
+  to: ["+14155551234", "+14155555678"],
+  text: "Hey team - quick sync at noon?"
+)
+
+puts group.id                # => "msg_abc123"
+puts group.group_message_id  # => "grp_..." (present on live sends)
+puts group.status            # => "sent" (or "delivered" when simulated)
+puts group.simulated?        # => true on test keys / before verification
+
+# With media instead of (or in addition to) text
+client.messages.send_group(
+  to: ["+14155551234", "+14155555678"],
+  media_urls: ["https://cdn.example.com/flyer.jpg"],
+  message_type: "marketing"
+)
+```
+
+Billed per recipient. US/Canada destinations only.
+
+### AI Message Enhancement
+
+Rewrite a draft into a single, polished SMS segment (≤160 chars) and get a
+short explanation of what changed. Pass `message_type` to steer the tone; with
+no `text` the model generates a suitable message for that type. At least one of
+`text` or `message_type` is required. Requires the `ai_classification` feature —
+when AI is unavailable, the original text is returned with an empty explanation.
+
+```ruby
+result = client.messages.enhance(
+  text: "hey come check out our sale this weekend",
+  message_type: "marketing"
+)
+
+puts result.enhanced     # polished, ≤160-char rewrite
+puts result.explanation  # what changed and why
+puts result.model        # model used (when available)
+```
+
 ## Webhooks
 
 ```ruby
@@ -295,8 +343,264 @@ end
 result = client.account.create_api_key('Production Key')
 puts "New key: #{result['key']}"  # Only shown once!
 
+# Rotate an API key. Issues a new key and keeps the old one valid for a grace
+# period (default 24h; 24-168 allowed) so you can deploy before the old expires.
+rotation = client.account.rotate_api_key('key_xxx', grace_period_hours: 72)
+puts "New key: #{rotation['newKey']['key']}"  # Only shown once!
+puts rotation['message']                      # "Old key will expire in 72 hours"
+
 # Revoke an API key
 client.account.revoke_api_key('key_xxx')
+```
+
+## Contacts
+
+Manage your contact directory. `list` returns a Hash with a `:contacts` array
+of `Contact` objects plus pagination fields.
+
+```ruby
+# Create a contact
+contact = client.contacts.create(
+  phone_number: "+15551234567",
+  name: "Alice Example",
+  email: "alice@example.com",
+  metadata: { plan: "pro" }
+)
+
+# List / search (scope to a list with list_id:)
+result = client.contacts.list(limit: 50, search: "alice")
+result[:contacts].each { |c| puts "#{c.name}: #{c.phone_number}" }
+puts result[:total]
+
+# Get, update, delete
+c = client.contacts.get(contact.id)
+client.contacts.update(contact.id, name: "Alice E.")
+client.contacts.delete(contact.id)
+
+# A contact's helper flags
+puts c.opted_out?  # excluded from marketing sends
+puts c.invalid?    # auto-flagged as unreachable (landline / bad number)
+
+# Bulk import (dedupes by phone; each entry is a Hash)
+report = client.contacts.import_contacts(
+  [
+    { phone: "+15551234567", name: "Alice" },
+    { phone: "+15559876543", name: "Bob", email: "bob@example.com" }
+  ],
+  list_id: "list_abc"
+)
+puts "Imported #{report[:imported]}, skipped #{report[:skipped_duplicates]}"
+
+# Clear the auto-invalid flag (single or bulk)
+client.contacts.mark_valid(contact.id)
+client.contacts.bulk_mark_valid(list_id: "list_abc")
+
+# Trigger a carrier line-type lookup (async; landlines get excluded)
+client.contacts.check_numbers(list_id: "list_abc", force: false)
+```
+
+## Contact Lists
+
+Group contacts into lists for campaigns. Access via `client.contacts.lists`.
+
+```ruby
+# Create and manage lists
+list = client.contacts.lists.create(name: "VIP Customers", description: "Top spenders")
+all = client.contacts.lists.list
+all[:lists].each { |l| puts "#{l.name} (#{l.contact_count})" }
+
+# Get a list (paginate its members)
+detail = client.contacts.lists.get(list.id, limit: 100, offset: 0)
+
+client.contacts.lists.update(list.id, name: "VIPs")
+
+# Add / remove members
+result = client.contacts.lists.add_contacts(list.id, ["contact_1", "contact_2"])
+puts "Added #{result[:added_count]}"
+client.contacts.lists.remove_contact(list.id, "contact_1")
+
+client.contacts.lists.delete(list.id)
+```
+
+## Campaigns
+
+Send a message to one or more contact lists as a single campaign.
+
+```ruby
+# Create a campaign
+campaign = client.campaigns.create(
+  name: "Spring Sale",
+  text: "Our spring sale is live! 20% off everything.",
+  contact_list_ids: ["list_abc"]
+)
+
+# Preview cost + reachability before sending
+preview = client.campaigns.preview(campaign.id)
+puts "Recipients: #{preview.recipient_count}"
+puts "Credits needed: #{preview.estimated_credits}"
+puts "Enough credits? #{preview.enough_credits?}"
+
+# Send now, or schedule for later
+client.campaigns.send_campaign(campaign.id)
+client.campaigns.schedule(campaign.id, scheduled_at: "2025-06-01T15:00:00Z", timezone: "America/New_York")
+
+# List, update, cancel, clone, delete
+client.campaigns.list(status: "sent")[:campaigns].each { |c| puts "#{c.name}: #{c.status}" }
+client.campaigns.update(campaign.id, name: "Spring Sale (v2)")
+client.campaigns.cancel(campaign.id)
+client.campaigns.clone(campaign.id)
+client.campaigns.delete(campaign.id)
+```
+
+## Templates
+
+Reusable message templates with variables. AI can also draft one for you.
+
+```ruby
+# Create / list / get
+template = client.templates.create(
+  name: "Order shipped",
+  body: "Hi {{name}}, order #{{order_id}} has shipped!",
+  is_published: true
+)
+client.templates.list(type: "custom")[:templates].each { |t| puts t.name }
+t = client.templates.get(template.id)
+
+# Update, publish/unpublish, clone
+client.templates.update(template.id, body: "Hi {{name}}, your order is on the way!")
+client.templates.publish(template.id)
+client.templates.unpublish(template.id)
+client.templates.clone(template.id, name: "Order shipped (copy)")
+client.templates.delete(template.id)
+
+# Generate a template with AI
+generated = client.templates.generate(description: "A friendly appointment reminder")
+puts generated.text
+puts generated.variables.inspect
+```
+
+## Conversations
+
+Two-way messaging threads with your contacts.
+
+```ruby
+# List conversations (Enumerable)
+conversations = client.conversations.list(status: "active")
+conversations.each { |c| puts "#{c.phone_number}: #{c.last_message_text}" }
+
+# Get one, optionally with its messages
+convo = client.conversations.get("conv_abc", include_messages: true)
+
+# Reply in a thread
+client.conversations.reply("conv_abc", text: "Thanks for reaching out!")
+
+# Lifecycle + metadata
+client.conversations.mark_read("conv_abc")
+client.conversations.close("conv_abc")
+client.conversations.reopen("conv_abc")
+client.conversations.update("conv_abc", tags: ["priority"], metadata: { csat: 5 })
+
+# Apply / remove labels
+client.conversations.add_labels("conv_abc", label_ids: ["label_1"])
+client.conversations.remove_label("conv_abc", label_id: "label_1")
+
+# AI: conversation context + suggested replies
+context = client.conversations.get_context("conv_abc", max_messages: 20)
+puts context.token_estimate
+
+replies = client.conversations.suggest_replies("conv_abc")
+replies.each { |r| puts "[#{r.tone}] #{r.text}" }
+
+# Auto-paginate every conversation
+client.conversations.each(status: "active") { |c| puts c.id }
+```
+
+## Drafts
+
+Stage replies for review before they're sent (approve → sends via the API).
+
+```ruby
+draft = client.drafts.create(
+  conversation_id: "conv_abc",
+  text: "Here's the info you asked for.",
+  source: "agent"
+)
+
+client.drafts.list(conversation_id: "conv_abc", status: "pending").each { |d| puts d.text }
+client.drafts.update(draft.id, text: "Here is the info you asked for.")
+
+# Approve (sends the message) or reject with a reason
+client.drafts.approve(draft.id)
+client.drafts.reject(draft.id, reason: "Needs the discount code")
+```
+
+## Labels
+
+Organize conversations with labels.
+
+```ruby
+label = client.labels.create(name: "Urgent", color: "#ff0000", description: "Needs a fast reply")
+client.labels.list.each { |l| puts l.name }
+client.labels.delete(label.id)
+```
+
+## Rules
+
+Automations that act on inbound messages based on conditions.
+
+```ruby
+rule = client.rules.create(
+  name: "Auto-label opt-outs",
+  conditions: { keyword: "STOP" },
+  actions: { add_label: "opted-out" },
+  priority: 1
+)
+
+client.rules.list.each { |r| puts "#{r.name} (priority #{r.priority})" }
+client.rules.update(rule.id, priority: 2)
+client.rules.delete(rule.id)
+```
+
+## Verify
+
+Phone verification (OTP) — send a code, then check it. Hosted verification
+sessions are available under `client.verify.sessions`.
+
+```ruby
+# Send a verification code
+verification = client.verify.send(to: "+15551234567", app_name: "Acme")
+puts verification.id
+
+# Check the code the user entered
+result = client.verify.check(verification.id, code: "123456")
+puts result.verified?
+
+# Resend, fetch, and list
+client.verify.resend(verification.id)
+client.verify.get(verification.id)
+client.verify.list(status: "verified")[:verifications].each { |v| puts v.phone }
+
+# Hosted verification session (returns a URL to send the user to)
+session = client.verify.sessions.create(
+  success_url: "https://example.com/verified",
+  brand_name: "Acme"
+)
+puts session.url
+check = client.verify.sessions.validate(token: "session_token")
+puts check.valid?
+```
+
+## Media
+
+Upload an image to attach to an MMS (returns a hosted media URL).
+
+```ruby
+# From a file path
+media = client.media.upload("flyer.jpg", content_type: "image/jpeg")
+puts media.url
+
+# ...then attach it to a send
+client.messages.send(to: "+15551234567", text: "Check this out!", media_urls: [media.url])
 ```
 
 ## Numbers
@@ -337,6 +641,24 @@ when 'documents_required', 'payment_required'
   puts "Visit #{purchase.action_url} and enter code #{purchase.action_code}"
   # ...after the action completes:
   # client.numbers.buy(..., action_code: purchase.action_code)
+end
+
+# Get one number you own (includes is_default, which the list omits)
+number = client.numbers.get('num_abc123')
+puts "#{number.phone_number} — default sender: #{number.is_default}"
+
+# Update a number — make it the default sender (must be active),
+# and/or cancel a scheduled release ("keep this number")
+client.numbers.update('num_abc123', is_default: true)
+client.numbers.update('num_abc123', pending_cancellation: false)
+
+# Release a number. A live paid purchase is cancelled at the end of the paid
+# period (scheduled?), everything else is released immediately.
+result = client.numbers.release('num_abc123')
+if result.scheduled?
+  puts "Releases at #{result.scheduled_release_at}"
+else
+  puts "Released"
 end
 ```
 
@@ -385,6 +707,42 @@ end
 client.ten_dlc.list_brands[:brands].each { |b| puts "#{b.legal_name} — #{b.status}" }
 client.ten_dlc.list_campaigns[:campaigns].each { |c| puts "#{c.use_case} — #{c.status}" }
 client.ten_dlc.list_assignments[:assignments].each { |a| puts "#{a.phone_number} — #{a.status}" }
+```
+
+## URL Shortening (Branded Links)
+
+Mint branded short links for a destination URL, list them with click
+analytics, and disable an individual link (a per-link kill switch). Branded,
+owned-domain short links improve deliverability — carriers filter public
+shorteners — and give you click data.
+
+> **Not yet GA.** URL shortening is gated behind the `url_shortener` rollout
+> flag (currently founder-only). Until the flag is on for your account, calls
+> return a 404 (`Sendly::NotFoundError`) — the feature reads as absent.
+
+```ruby
+# Shorten a URL (must be http/https)
+link = client.links.create(url: "https://example.com/spring-sale?utm_source=sms")
+puts link.short_url        # => "https://sendly.live/l/Ab3xY7"
+puts link.code             # => "Ab3xY7"
+puts link.destination_url  # => "https://example.com/spring-sale?utm_source=sms"
+
+# List your links with click counts (limit 1-200, default 50)
+listing = client.links.list(limit: 20)
+puts listing.total
+listing.each do |l|
+  puts "#{l.short_url} -> #{l.destination_url} (#{l.click_count} clicks)"
+  puts "  last click: #{l.last_country} #{l.last_clicked_at}"
+  puts "  14-day spark: #{l.spark.inspect}"
+end
+
+# Disable (redirect returns 404) or re-enable a link
+client.links.disable(link.code)
+client.links.enable(link.code)
+
+# Or set the state explicitly
+status = client.links.update(link.code, disabled: true)
+puts status.disabled?
 ```
 
 ## Error Handling
