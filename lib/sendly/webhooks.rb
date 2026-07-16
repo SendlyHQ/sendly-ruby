@@ -56,6 +56,22 @@ module Sendly
     EVENT_CONTACT_MARKED_VALID          = "contact.marked_valid"
     EVENT_CONTACTS_LOOKUP_COMPLETED     = "contacts.lookup_completed"
     EVENT_CONTACTS_BULK_MARKED_VALID    = "contacts.bulk_marked_valid"
+    EVENT_BRAND_VERIFIED                = "brand.verified"
+    EVENT_BRAND_FAILED                  = "brand.failed"
+    EVENT_CAMPAIGN_APPROVED             = "campaign.approved"
+    EVENT_CAMPAIGN_REJECTED             = "campaign.rejected"
+    EVENT_CAMPAIGN_SUSPENDED            = "campaign.suspended"
+    EVENT_ASSIGNMENT_CONFIRMED          = "assignment.confirmed"
+    EVENT_ASSIGNMENT_FAILED             = "assignment.failed"
+    EVENT_PORT_COMPLETED                = "port.completed"
+    EVENT_PORT_OUT_REQUESTED            = "port_out.requested"
+    EVENT_PORT_OUT_COMPLETED            = "port_out.completed"
+    EVENT_PORT_OUT_REJECTED             = "port_out.rejected"
+    EVENT_PORT_OUT_CANCELLED            = "port_out.cancelled"
+    EVENT_NUMBER_ACTIVATED              = "number.activated"
+    EVENT_NUMBER_FAILED                 = "number.failed"
+    EVENT_NUMBER_REQUIREMENTS_REQUIRED  = "number.requirements_required"
+    EVENT_NUMBER_RELEASED               = "number.released"
 
     # Source of a list-health event. Frozen enum — new values will be
     # added in minor SDK versions, never removed.
