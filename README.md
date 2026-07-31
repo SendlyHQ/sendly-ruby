@@ -745,6 +745,85 @@ status = client.links.update(link.code, disabled: true)
 puts status.disabled?
 ```
 
+## WhatsApp
+
+Connect a number you own to WhatsApp, create Meta-reviewed message
+templates, and send via `client.messages.send(channel: "whatsapp", ...)`.
+Connecting is a one-time $19 setup (no monthly fee) and always ends with a
+human step: the signup returns a connect URL a person must open in a
+browser and log in with Facebook to link their WhatsApp Business Account.
+
+Free-form text and media only deliver inside a 24-hour customer-service
+window (opened by the recipient messaging you); an approved template works
+anytime. Templates are reviewed by Meta (typically 24-48h) and categorized
+as authentication, utility, or marketing — pricing follows the category and
+destination country. Note: Meta has paused marketing template delivery to
+US (+1) numbers.
+
+```ruby
+# 1. Connect a number ($19 one-time; a human must open the connect URL)
+signup = client.whatsapp.signup.create(phone_number: "+15559876543")
+puts "Have your user open: #{signup.connect_url}"
+
+# 2. Poll until active
+status = client.whatsapp.signup.get(signup.id)
+puts status.failure_reasons if status.failed?
+
+# List your connected senders
+client.whatsapp.senders.list[:senders].each do |s|
+  puts "#{s.phone_number} (#{s.display_name || 'no name yet'}) — #{s.status}"
+end
+
+# 3. Create a template (Meta reviews it, usually 24-48h)
+template = client.whatsapp.templates.create(
+  sender: "+15559876543",
+  name: "order_shipped",
+  language: "en_US",
+  category: "UTILITY",
+  body: "Hi {{1}}, your order {{2}} has shipped!",
+  examples: { "1" => "Sam", "2" => "#4821" }
+)
+puts template.status  # "PENDING"
+
+# List, edit-and-resubmit (the recovery path for rejections), or delete
+client.whatsapp.templates.list[:templates].each { |t| puts "#{t.name} — #{t.status}" }
+client.whatsapp.templates.update(template.id, body: "Hi {{1}}, order {{2}} is on its way!",
+                                              examples: { "1" => "Sam", "2" => "#4821" })
+client.whatsapp.templates.delete(template.id)
+
+# 4. Send — free-form inside an open 24h window, template anytime
+window = client.whatsapp.window(from: "+15559876543", to: "+15551234567")
+if window.open?
+  client.messages.send(
+    channel: "whatsapp",
+    to: "+15551234567",
+    from: "+15559876543",
+    text: "Your table is ready!"
+  )
+else
+  message = client.messages.send(
+    channel: "whatsapp",
+    to: "+15551234567",
+    from: "+15559876543",
+    template: {
+      name: "order_shipped",
+      language: "en_US",
+      variables: { "1" => "Acme Inc", "2" => "#4821" }
+    }
+  )
+  puts message.whatsapp.kind  # "template"
+end
+
+# Media with a caption (also window-bound; one attachment per message)
+client.messages.send(
+  channel: "whatsapp",
+  to: "+15551234567",
+  from: "+15559876543",
+  text: "Here is your receipt",
+  media_urls: ["https://example.com/receipt.pdf"]
+)
+```
+
 ## Error Handling
 
 ```ruby

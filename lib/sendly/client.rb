@@ -178,6 +178,13 @@ module Sendly
       @links ||= LinksResource.new(self)
     end
 
+    # Access the WhatsApp resource
+    #
+    # @return [Sendly::WhatsAppResource]
+    def whatsapp
+      @whatsapp ||= WhatsAppResource.new(self)
+    end
+
     # Make a GET request
     #
     # @param path [String] API path

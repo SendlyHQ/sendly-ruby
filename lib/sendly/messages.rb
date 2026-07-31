@@ -10,14 +10,32 @@ module Sendly
       @client = client
     end
 
-    # Send an SMS message
+    # Send an SMS or WhatsApp message
+    #
+    # Pass +channel: "whatsapp"+ to send on WhatsApp. WhatsApp sends require
+    # a live API key and a +from+ number with an active WhatsApp connection
+    # (see +client.whatsapp.signup+). Provide exactly one of +text+
+    # (free-form, max 4096 bytes), +media_urls+ (a single attachment;
+    # optional +text+ becomes its caption, max 1024 bytes), or +template+
+    # (an approved template). Free-form text and media only deliver inside
+    # an open 24-hour customer-service window — outside it the API responds
+    # 422 +whatsapp_window_closed+; send a template instead (check with
+    # +client.whatsapp.window+).
     #
     # @param to [String] Recipient phone number in E.164 format
-    # @param text [String] Message content (max 1600 characters)
-    # @param from [String] Sender ID or phone number (optional)
-    # @param message_type [String] Message type: "marketing" (default) or "transactional"
+    # @param text [String] Message content (max 1600 characters for SMS);
+    #   for WhatsApp, optional free-form text or the media caption
+    # @param from [String] Sender ID or phone number (optional for SMS);
+    #   required for WhatsApp — must be a WhatsApp-connected number
+    # @param message_type [String] Message type: "marketing" (default) or "transactional" (SMS only)
     # @param metadata [Hash] Custom JSON metadata to attach to the message (max 4KB)
-    # @return [Sendly::Message] The sent message
+    # @param media_urls [Array<String>] Media URLs to attach (WhatsApp accepts exactly one)
+    # @param channel [String] Message channel: omit (or "sms") for SMS, "whatsapp" for WhatsApp
+    # @param template [Hash] WhatsApp only: approved template to send, with
+    #   :name, :language, and optional :variables ({ "1" => "Acme" }) and
+    #   :buttons ([{ index: 0, variables: { "1" => "4821" } }]). Works
+    #   regardless of the 24-hour window.
+    # @return [Sendly::Message, Sendly::WhatsAppMessage] The sent message
     #
     # @raise [Sendly::ValidationError] If parameters are invalid
     # @raise [Sendly::InsufficientCreditsError] If account has no credits
@@ -37,8 +55,49 @@ module Sendly
     #     text: "Your verification code is 123456",
     #     message_type: "transactional"
     #   )
-    def send(to:, text:, from: nil, message_type: nil, metadata: nil, media_urls: nil)
+    #
+    # @example WhatsApp free-form reply inside an open 24h window
+    #   message = client.messages.send(
+    #     channel: "whatsapp",
+    #     to: "+15551234567",
+    #     from: "+15559876543",
+    #     text: "Your table is ready!"
+    #   )
+    #
+    # @example WhatsApp template send — works regardless of the window
+    #   message = client.messages.send(
+    #     channel: "whatsapp",
+    #     to: "+15551234567",
+    #     from: "+15559876543",
+    #     template: {
+    #       name: "order_shipped",
+    #       language: "en_US",
+    #       variables: { "1" => "Acme Inc", "2" => "#4821" }
+    #     }
+    #   )
+    #   puts message.whatsapp.kind   # "template"
+    #   puts message.credits_used    # priced by country + category
+    def send(to:, text: nil, from: nil, message_type: nil, metadata: nil, media_urls: nil,
+             channel: nil, template: nil)
       validate_phone!(to)
+
+      if channel.to_s == "whatsapp"
+        validate_phone!(from)
+        has_media = media_urls.is_a?(Array) && !media_urls.empty?
+        if (text.nil? || text.empty?) && !has_media && template.nil?
+          raise ValidationError, "Provide 'text', 'media_urls', or 'template'"
+        end
+
+        body = { channel: "whatsapp", to: to, from: from }
+        body[:text] = text unless text.nil?
+        body[:mediaUrls] = media_urls if has_media
+        body[:template] = template if template
+        body[:metadata] = metadata if metadata
+
+        response = client.post("/messages", body)
+        return WhatsAppMessage.new(response)
+      end
+
       validate_text!(text)
 
       body = { to: to, text: text }
