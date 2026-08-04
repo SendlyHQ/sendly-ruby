@@ -774,6 +774,19 @@ client.whatsapp.senders.list[:senders].each do |s|
   puts "#{s.phone_number} (#{s.display_name || 'no name yet'}) — #{s.status}"
 end
 
+# Read and update a sender's business profile (what recipients see when
+# they open your details in WhatsApp)
+profile = client.whatsapp.senders.get_profile("+15559876543")
+puts profile.display_name
+puts profile.about
+
+client.whatsapp.senders.update_profile(
+  "+15559876543",
+  about: "Fresh roasted coffee, delivered.",               # max 139 chars
+  description: "Small-batch roaster shipping nationwide.", # max 512 chars
+  website: "https://acme.example"
+)
+
 # 3. Create a template (Meta reviews it, usually 24-48h)
 template = client.whatsapp.templates.create(
   sender: "+15559876543",
@@ -821,6 +834,85 @@ client.messages.send(
   from: "+15559876543",
   text: "Here is your receipt",
   media_urls: ["https://example.com/receipt.pdf"]
+)
+```
+
+## RCS
+
+Send branded rich messages — text with suggested replies and actions, or
+rich cards with an image and buttons — through your workspace's RCS agent
+by passing `channel: "rcs"` to `client.messages.send`. Delivery is
+per-recipient: not every device or network supports RCS. Text sends fall
+back to plain SMS automatically (billed as SMS) unless you disable the
+fallback; rich cards have no SMS form and only deliver to RCS-capable
+recipients.
+
+The RCS channel is being rolled out gradually and is not yet generally
+available; until it is enabled for your account the endpoints read as
+absent and calls raise `Sendly::NotFoundError` (HTTP 404). RCS sends and
+capability checks require a live API key. RCS agents are registered by
+Sendly for your brand — contact support to set one up.
+
+```ruby
+# Discover your RCS agents ("testing" reaches invited test devices only;
+# "approved" reaches everyone). Pass agent_id on sends and capability
+# checks when your workspace has more than one agent.
+client.rcs.agents.list[:agents].each do |a|
+  puts "#{a.name} — #{a.status}#{a.sendable? ? ' (sendable)' : ''}"
+end
+
+# Pre-flight: can this recipient receive RCS?
+capability = client.rcs.capability(to: "+15551234567")
+puts capability.capable? ? "RCS" : "would fall back to SMS"
+
+# Text with suggested replies and actions. Nested suggestion and card
+# hashes are passed through verbatim, so they use the camelCase keys the
+# API expects.
+message = client.messages.send(
+  channel: "rcs",
+  to: "+15551234567",
+  text: "Your order has shipped! Want live updates?",
+  suggestions: [
+    { reply: { text: "Yes, notify me", postbackData: "notify_yes" } },
+    { action: { text: "Track order", postbackData: "track",
+                url: "https://acme.example/orders/4821" } }
+  ]
+)
+
+# The response discloses which channel delivered
+puts message.channel # "rcs", or "sms" when it fell back
+if message.fell_back?
+  # Delivered as plain SMS (billed as SMS). Suggestions have no SMS form
+  # and were dropped — message.rcs.suggestions_dropped is true.
+else
+  puts message.rcs.kind       # "text" or "card"
+  puts message.rcs.agent_name # the brand name recipients see
+end
+
+# Rich card (RCS-capable recipients only — cards have no SMS form)
+client.messages.send(
+  channel: "rcs",
+  to: "+15551234567",
+  card: {
+    title: "Spring collection",
+    description: "New arrivals are in - take a look.",
+    mediaUrl: "https://example.com/spring.jpg", # public JPEG, PNG, or GIF
+    orientation: "vertical",                    # or "horizontal"
+    suggestions: [
+      { action: { text: "Shop now", postbackData: "shop",
+                  url: "https://acme.example/spring" } }
+    ]
+  }
+)
+
+# Opt out of the SMS fallback — the send raises Sendly::ValidationError
+# (HTTP 422 rcs_not_supported_for_recipient) when the recipient can't
+# receive RCS
+client.messages.send(
+  channel: "rcs",
+  to: "+15551234567",
+  text: "RCS or nothing",
+  fallback_to_sms: false
 )
 ```
 

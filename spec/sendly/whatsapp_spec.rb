@@ -35,6 +35,20 @@ RSpec.describe Sendly::WhatsAppResource do
     }.merge(overrides)
   end
 
+  def profile_response(overrides = {})
+    {
+      'phoneNumber' => '+15559876543',
+      'displayName' => 'Acme Inc',
+      'profilePhotoUrl' => 'https://example.com/logo.png',
+      'category' => 'FOOD_AND_GROCERY',
+      'about' => 'Fresh roasted coffee, delivered.',
+      'description' => 'Small-batch roaster shipping nationwide.',
+      'email' => 'hello@acme.example',
+      'website' => 'https://acme.example',
+      'address' => '123 Bean St, Portland, OR'
+    }.merge(overrides)
+  end
+
   def template_response(overrides = {})
     {
       'id' => 'wat_abc123',
@@ -169,6 +183,84 @@ RSpec.describe Sendly::WhatsAppResource do
                                response_body: { 'senders' => [] })
 
         expect(whatsapp.senders.list[:senders]).to be_empty
+      end
+    end
+
+    describe '#get_profile' do
+      it 'returns the business profile as a WhatsAppSenderProfile' do
+        stub_request_with_auth(:get, '/whatsapp/senders/%2B15559876543/profile',
+                               response_body: profile_response)
+
+        profile = whatsapp.senders.get_profile('+15559876543')
+
+        expect(profile).to be_a(Sendly::WhatsAppSenderProfile)
+        expect(profile.phone_number).to eq('+15559876543')
+        expect(profile.display_name).to eq('Acme Inc')
+        expect(profile.profile_photo_url).to eq('https://example.com/logo.png')
+        expect(profile.category).to eq('FOOD_AND_GROCERY')
+        expect(profile.about).to eq('Fresh roasted coffee, delivered.')
+        expect(profile.website).to eq('https://acme.example')
+      end
+
+      it 'leaves unset fields nil' do
+        stub_request_with_auth(:get, '/whatsapp/senders/%2B15559876543/profile',
+                               response_body: profile_response('about' => nil,
+                                                               'description' => nil,
+                                                               'address' => nil))
+
+        profile = whatsapp.senders.get_profile('+15559876543')
+
+        expect(profile.about).to be_nil
+        expect(profile.description).to be_nil
+        expect(profile.address).to be_nil
+        expect(profile.to_h).not_to have_key(:about)
+      end
+
+      it 'raises NotFoundError when the number is not connected to WhatsApp' do
+        stub_request_with_auth(:get, '/whatsapp/senders/%2B15559876543/profile',
+                               status: 404,
+                               response_body: {
+                                 'error' => 'whatsapp_sender_not_connected',
+                                 'message' => "This number isn't connected to WhatsApp yet."
+                               })
+
+        expect { whatsapp.senders.get_profile('+15559876543') }
+          .to raise_error(Sendly::NotFoundError)
+      end
+
+      it 'raises ValidationError when phone_number is missing' do
+        expect { whatsapp.senders.get_profile(nil) }
+          .to raise_error(Sendly::ValidationError, /phone_number is required/)
+      end
+    end
+
+    describe '#update_profile' do
+      it 'patches only the given fields and returns the updated profile' do
+        stub = stub_request(:patch, "#{base_url}/whatsapp/senders/%2B15559876543/profile")
+          .with(
+            headers: { 'Authorization' => "Bearer #{valid_api_key}" },
+            body: { about: 'Now roasting decaf too.', website: 'https://acme.example' }.to_json
+          )
+          .to_return(status: 200,
+                     body: profile_response('about' => 'Now roasting decaf too.').to_json)
+
+        profile = whatsapp.senders.update_profile('+15559876543',
+                                                  about: 'Now roasting decaf too.',
+                                                  website: 'https://acme.example')
+
+        expect(stub).to have_been_requested
+        expect(profile).to be_a(Sendly::WhatsAppSenderProfile)
+        expect(profile.about).to eq('Now roasting decaf too.')
+      end
+
+      it 'raises ValidationError when no field is given' do
+        expect { whatsapp.senders.update_profile('+15559876543') }
+          .to raise_error(Sendly::ValidationError, /Provide at least one profile field/)
+      end
+
+      it 'raises ValidationError when phone_number is missing' do
+        expect { whatsapp.senders.update_profile('', about: 'Hi') }
+          .to raise_error(Sendly::ValidationError, /phone_number is required/)
       end
     end
   end

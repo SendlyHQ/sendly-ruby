@@ -185,6 +185,13 @@ module Sendly
       @whatsapp ||= WhatsAppResource.new(self)
     end
 
+    # Access the RCS resource
+    #
+    # @return [Sendly::RcsResource]
+    def rcs
+      @rcs ||= RcsResource.new(self)
+    end
+
     # Make a GET request
     #
     # @param path [String] API path

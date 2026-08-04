@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
+require_relative "lib/sendly/version"
+
 Gem::Specification.new do |spec|
   spec.name          = "sendly"
-  spec.version       = "3.37.0"
+  spec.version       = Sendly::VERSION
   spec.authors       = ["Sendly"]
   spec.email         = ["support@sendly.live"]
 

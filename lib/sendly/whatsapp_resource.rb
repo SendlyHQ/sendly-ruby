@@ -106,6 +106,36 @@ module Sendly
     end
   end
 
+  # A sender's WhatsApp business profile — what recipients see when they
+  # open the sender's details in WhatsApp. Unset fields are nil.
+  # +profile_photo_url+ is read-only here: the photo cannot be set through
+  # {WhatsAppSendersResource#update_profile}.
+  class WhatsAppSenderProfile
+    attr_reader :phone_number, :display_name, :profile_photo_url, :category,
+                :about, :description, :email, :website, :address
+
+    def initialize(data)
+      @phone_number = data["phoneNumber"] || data["phone_number"]
+      @display_name = data["displayName"] || data["display_name"]
+      @profile_photo_url = data["profilePhotoUrl"] || data["profile_photo_url"]
+      @category = data["category"]
+      @about = data["about"]
+      @description = data["description"]
+      @email = data["email"]
+      @website = data["website"]
+      @address = data["address"]
+    end
+
+    def to_h
+      {
+        phone_number: phone_number, display_name: display_name,
+        profile_photo_url: profile_photo_url, category: category,
+        about: about, description: description, email: email,
+        website: website, address: address
+      }.compact
+    end
+  end
+
   # A WhatsApp message template. Meta reviews every template (usually
   # 24-48h) and may reclassify its category — the category on the record
   # is what drives per-message pricing. +rejection_reason+ is set when the
@@ -309,7 +339,8 @@ module Sendly
     end
   end
 
-  # List the numbers connected (or connecting) to WhatsApp.
+  # List the numbers connected (or connecting) to WhatsApp, and manage
+  # their business profiles.
   class WhatsAppSendersResource
     def initialize(client)
       @client = client
@@ -329,6 +360,75 @@ module Sendly
       response = @client.get("/whatsapp/senders")
       senders = (response["senders"] || []).map { |s| WhatsAppSender.new(s) }
       { senders: senders }
+    end
+
+    # Get a sender's WhatsApp business profile.
+    #
+    # The business profile is what recipients see when they open the
+    # sender's details in WhatsApp: display name, photo, category, about
+    # line, description, and contact details. The sender must be +"active"+
+    # (connected to WhatsApp).
+    #
+    # @param phone_number [String] Your WhatsApp-connected sending number,
+    #   in E.164 format
+    # @return [WhatsAppSenderProfile]
+    # @raise [Sendly::NotFoundError] If the number isn't connected to WhatsApp
+    #
+    # @example
+    #   profile = client.whatsapp.senders.get_profile("+15559876543")
+    #   puts profile.display_name
+    #   puts profile.about
+    def get_profile(phone_number)
+      raise ValidationError, "phone_number is required" if phone_number.nil? || phone_number.to_s.empty?
+
+      encoded_number = URI.encode_www_form_component(phone_number)
+      response = @client.get("/whatsapp/senders/#{encoded_number}/profile")
+      WhatsAppSenderProfile.new(response)
+    end
+
+    # Update a sender's WhatsApp business profile.
+    #
+    # Pass only the fields to change; omitted fields keep their current
+    # value. +about+ is limited to 139 characters and +description+ to 512.
+    # +display_name+ changes are reviewed by Meta before they take effect.
+    # The profile photo cannot be set through this method. Requires a live
+    # API key.
+    #
+    # @param phone_number [String] Your WhatsApp-connected sending number,
+    #   in E.164 format
+    # @param display_name [String, nil] The business name recipients see
+    # @param about [String, nil] Short profile line (max 139 characters)
+    # @param description [String, nil] Longer business description (max 512 characters)
+    # @param category [String, nil] Business category shown on the profile
+    # @param email [String, nil] Contact email shown on the profile
+    # @param website [String, nil] Website shown on the profile
+    # @param address [String, nil] Business address shown on the profile
+    # @return [WhatsAppSenderProfile] The updated profile
+    # @raise [Sendly::ValidationError] If no field is given, or a field is too long
+    # @raise [Sendly::NotFoundError] If the number isn't connected to WhatsApp
+    #
+    # @example
+    #   client.whatsapp.senders.update_profile("+15559876543",
+    #     about: "Fresh roasted coffee, delivered.",
+    #     website: "https://acme.example"
+    #   )
+    def update_profile(phone_number, display_name: nil, about: nil, description: nil,
+                       category: nil, email: nil, website: nil, address: nil)
+      raise ValidationError, "phone_number is required" if phone_number.nil? || phone_number.to_s.empty?
+
+      body = {}
+      body[:displayName] = display_name unless display_name.nil?
+      body[:about] = about unless about.nil?
+      body[:description] = description unless description.nil?
+      body[:category] = category unless category.nil?
+      body[:email] = email unless email.nil?
+      body[:website] = website unless website.nil?
+      body[:address] = address unless address.nil?
+      raise ValidationError, "Provide at least one profile field to update" if body.empty?
+
+      encoded_number = URI.encode_www_form_component(phone_number)
+      response = @client.patch("/whatsapp/senders/#{encoded_number}/profile", body)
+      WhatsAppSenderProfile.new(response)
     end
   end
 
@@ -469,8 +569,8 @@ module Sendly
     end
   end
 
-  # WhatsApp resource — connect senders, manage templates, and check
-  # 24-hour windows.
+  # WhatsApp resource — connect senders, manage their business profiles and
+  # templates, and check 24-hour windows.
   #
   # WhatsApp is a first-class Sendly channel: connect a number you own,
   # create Meta-reviewed message templates, and send via
@@ -514,7 +614,8 @@ module Sendly
     # @return [WhatsAppSignupResource] Connect numbers to WhatsApp
     attr_reader :signup
 
-    # @return [WhatsAppSendersResource] List connected numbers
+    # @return [WhatsAppSendersResource] List connected numbers and manage
+    #   their business profiles
     attr_reader :senders
 
     # @return [WhatsAppTemplatesResource] Manage Meta-reviewed templates
