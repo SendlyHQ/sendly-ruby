@@ -39,15 +39,15 @@ module Sendly
       params[:offset] = offset if offset
 
       response = @client.get("/credits/transactions", params)
-      response.map { |data| CreditTransaction.new(data) }
+      (response["transactions"] || []).map { |data| CreditTransaction.new(data) }
     end
 
     # List API keys for the account
     #
     # @return [Array<Sendly::ApiKey>]
     def api_keys
-      response = @client.get("/keys")
-      response.map { |data| ApiKey.new(data) }
+      response = @client.get("/account/keys")
+      (response["keys"] || []).map { |data| ApiKey.new(data) }
     end
 
     # Get a specific API key by ID
@@ -55,7 +55,7 @@ module Sendly
     # @param key_id [String] API key ID
     # @return [Sendly::ApiKey]
     def api_key(key_id)
-      response = @client.get("/keys/#{key_id}")
+      response = @client.get("/account/keys/#{key_id}")
       ApiKey.new(response)
     end
 
@@ -64,7 +64,7 @@ module Sendly
     # @param key_id [String] API key ID
     # @return [Hash] Usage statistics
     def api_key_usage(key_id)
-      @client.get("/keys/#{key_id}/usage")
+      @client.get("/account/keys/#{key_id}/usage")
     end
 
     # Create a new API key
@@ -88,11 +88,15 @@ module Sendly
     # Revoke an API key
     #
     # @param key_id [String] API key ID to revoke
-    # @return [void]
-    def revoke_api_key(key_id)
+    # @param reason [String, nil] Optional reason recorded on the key's audit trail
+    # @return [Hash] +{ "id" => ..., "name" => ..., "revoked" => true, "revokedAt" => ... }+
+    def revoke_api_key(key_id, reason: nil)
       raise ArgumentError, "API key ID is required" if key_id.nil? || key_id.empty?
 
-      @client.delete("/account/keys/#{key_id}")
+      body = {}
+      body[:reason] = reason if reason
+
+      @client.patch("/account/keys/#{key_id}/revoke", body)
     end
 
     # Rotate an API key.

@@ -383,6 +383,8 @@ module Sendly
       req["User-Agent"] = "sendly-ruby/#{Sendly::VERSION}"
       req["Content-Type"] = "multipart/form-data; boundary=#{boundary}"
       req["X-Organization-Id"] = @client.organization_id if @client.organization_id
+      # Single-use auto key (this path has no retry loop).
+      req["Idempotency-Key"] = @client.generate_idempotency_key
       req.body = body_parts.join
 
       begin

@@ -203,11 +203,21 @@ module Sendly
 
     # Make a POST request
     #
+    # Every POST carries an Idempotency-Key header. By default the client
+    # generates one per logical request ("sendly-ruby-retry-<uuid>") so the
+    # server can dedupe the client's own retries; pass +idempotency_key+ to
+    # supply your own (1-255 printable ASCII characters) and extend that
+    # protection across process restarts, or +auto_idempotency_key: false+
+    # to skip auto-generation for endpoints that dedupe by other means.
+    #
     # @param path [String] API path
     # @param body [Hash] Request body
+    # @param idempotency_key [String, nil] Caller-supplied idempotency key (optional)
+    # @param auto_idempotency_key [Boolean] Auto-generate a key when none is supplied (default: true)
     # @return [Hash] Response body
-    def post(path, body = {})
-      request(:post, path, body: body)
+    def post(path, body = {}, idempotency_key: nil, auto_idempotency_key: true)
+      request(:post, path, body: body, idempotency_key: idempotency_key,
+                           auto_idempotency_key: auto_idempotency_key)
     end
 
     # Make a PATCH request
@@ -271,10 +281,14 @@ module Sendly
     # @param file [String, IO] File path or IO object
     # @param content_type [String] MIME type of the file
     # @param filename [String] Name for the uploaded file
+    # @param idempotency_key [String, nil] Caller-supplied idempotency key (optional)
     # @return [Hash] Response body
-    def post_multipart(path, file, content_type: "image/jpeg", filename: "upload.jpg")
+    def post_multipart(path, file, content_type: "image/jpeg", filename: "upload.jpg", idempotency_key: nil)
       uri = build_uri(path, {})
       http = build_http(uri)
+
+      explicit_key = normalize_idempotency_key(idempotency_key)
+      key = explicit_key || generate_idempotency_key
 
       boundary = "SendlyRuby#{SecureRandom.hex(16)}"
 
@@ -297,6 +311,7 @@ module Sendly
 
       attempt = 0
       begin
+        req["Idempotency-Key"] = key
         response = http.request(req)
         handle_response(response)
       rescue Net::OpenTimeout, Net::ReadTimeout
@@ -313,11 +328,22 @@ module Sendly
       rescue ServerError => e
         attempt += 1
         if attempt <= max_retries
+          # A 5xx response may be cached under the key server-side, so an
+          # auto-generated key is rotated to let the retry re-execute.
+          # Caller-supplied keys are never rotated.
+          key = generate_idempotency_key if explicit_key.nil?
           sleep(2 ** attempt)
           retry
         end
         raise
       end
+    end
+
+    # Generate an idempotency key for a logical request. Reused across retry
+    # attempts so the server can recognize a retry of a POST that already
+    # reached it and return the original result instead of executing again.
+    def generate_idempotency_key
+      "sendly-ruby-retry-#{SecureRandom.uuid}"
     end
 
     private
@@ -330,13 +356,19 @@ module Sendly
       end
     end
 
-    def request(method, path, params: {}, body: nil, unversioned: false)
+    def request(method, path, params: {}, body: nil, unversioned: false, idempotency_key: nil,
+                auto_idempotency_key: true)
       uri = build_uri(path, params, unversioned: unversioned)
       http = build_http(uri)
       req = build_request(method, uri, body)
 
+      explicit_key = normalize_idempotency_key(idempotency_key)
+      key = explicit_key
+      key = generate_idempotency_key if key.nil? && method == :post && auto_idempotency_key
+
       attempt = 0
       begin
+        req["Idempotency-Key"] = key if key
         response = http.request(req)
         handle_response(response)
       rescue Net::OpenTimeout, Net::ReadTimeout
@@ -353,11 +385,32 @@ module Sendly
       rescue ServerError => e
         attempt += 1
         if attempt <= max_retries
+          # A 5xx response may be cached under the key server-side, so an
+          # auto-generated key is rotated to let the retry re-execute.
+          # Caller-supplied keys are never rotated.
+          key = generate_idempotency_key if key && explicit_key.nil?
           sleep(2 ** attempt) # Exponential backoff
           retry
         end
         raise
       end
+    end
+
+    # Validate and normalize a caller-supplied idempotency key. Empty and
+    # whitespace-only values are treated as absent (auto-generation still
+    # applies); invalid values fail fast instead of surfacing later as an
+    # API error.
+    def normalize_idempotency_key(key)
+      return nil if key.nil?
+
+      trimmed = key.to_s.strip
+      return nil if trimmed.empty?
+
+      if trimmed.length > 255 || !trimmed.match?(/\A[\x20-\x7E]+\z/)
+        raise ValidationError, "Idempotency key must be 1-255 printable ASCII characters"
+      end
+
+      trimmed
     end
 
     def build_uri(path, params, unversioned: false)

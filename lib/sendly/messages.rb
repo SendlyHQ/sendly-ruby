@@ -62,6 +62,13 @@ module Sendly
     # @param fallback_to_sms [Boolean] RCS only: deliver +text+ as plain SMS
     #   when the recipient can't receive RCS (default true). Pass false to
     #   fail with 422 +rcs_not_supported_for_recipient+ instead.
+    # @param idempotency_key [String] Idempotency key for this operation
+    #   (1-255 printable ASCII characters). The SDK already generates a key
+    #   per logical request automatically, so the server can dedupe the
+    #   SDK's own retries. Supply your own key when you need idempotency
+    #   across process restarts or your own retry loops — repeating a
+    #   request with the same key within 24 hours returns the original
+    #   response instead of executing again.
     # @return [Sendly::Message, Sendly::WhatsAppMessage, Sendly::RcsMessage] The sent message
     #
     # @raise [Sendly::ValidationError] If parameters are invalid
@@ -132,7 +139,7 @@ module Sendly
     #   )
     def send(to:, text: nil, from: nil, message_type: nil, metadata: nil, media_urls: nil,
              channel: nil, template: nil, agent_id: nil, card: nil, suggestions: nil,
-             fallback_to_sms: nil)
+             fallback_to_sms: nil, idempotency_key: nil)
       validate_phone!(to)
 
       if channel.to_s == "rcs"
@@ -148,7 +155,7 @@ module Sendly
         body[:fallbackToSms] = fallback_to_sms unless fallback_to_sms.nil?
         body[:metadata] = metadata if metadata
 
-        response = client.post("/messages", body)
+        response = client.post("/messages", body, idempotency_key: idempotency_key)
         return RcsMessage.new(response)
       end
 
@@ -165,7 +172,7 @@ module Sendly
         body[:template] = template if template
         body[:metadata] = metadata if metadata
 
-        response = client.post("/messages", body)
+        response = client.post("/messages", body, idempotency_key: idempotency_key)
         return WhatsAppMessage.new(response)
       end
 
@@ -177,7 +184,7 @@ module Sendly
       body[:metadata] = metadata if metadata
       body[:mediaUrls] = media_urls if media_urls
 
-      response = client.post("/messages", body)
+      response = client.post("/messages", body, idempotency_key: idempotency_key)
       # API returns message directly at top level
       Message.new(response)
     end
@@ -195,6 +202,8 @@ module Sendly
     # @param from [String] Sender ID or phone number (optional)
     # @param media_urls [Array<String>] Media URLs to attach (required unless text is provided)
     # @param message_type [String] Message type: "transactional" (default) or "marketing"
+    # @param idempotency_key [String] Idempotency key for this operation
+    #   (1-255 printable ASCII characters, optional)
     # @return [Sendly::GroupMessage] The sent group message, including a group_message_id
     #
     # @raise [Sendly::ValidationError] If fewer than 2 / more than 8 recipients, or no body
@@ -207,7 +216,7 @@ module Sendly
     #   )
     #   puts group.id
     #   puts group.group_message_id
-    def send_group(to:, text: nil, from: nil, media_urls: nil, message_type: nil)
+    def send_group(to:, text: nil, from: nil, media_urls: nil, message_type: nil, idempotency_key: nil)
       unless to.is_a?(Array) && to.length >= 2
         raise ValidationError, "Group messaging requires at least 2 recipients in 'to'"
       end
@@ -224,7 +233,7 @@ module Sendly
       body[:mediaUrls] = media_urls if has_media
       body[:messageType] = message_type if message_type
 
-      response = client.post("/messages/group", body)
+      response = client.post("/messages/group", body, idempotency_key: idempotency_key)
       GroupMessage.new(response)
     end
 
@@ -348,6 +357,8 @@ module Sendly
     # @param from [String] Sender ID or phone number (optional)
     # @param message_type [String] Message type: "marketing" (default) or "transactional"
     # @param metadata [Hash] Custom JSON metadata to attach to the message (max 4KB)
+    # @param idempotency_key [String] Idempotency key for this operation
+    #   (1-255 printable ASCII characters, optional)
     # @return [Hash] The scheduled message
     #
     # @raise [Sendly::ValidationError] If parameters are invalid
@@ -359,7 +370,7 @@ module Sendly
     #     scheduled_at: "2025-01-20T10:00:00Z"
     #   )
     #   puts scheduled["id"]
-    def schedule(to:, text:, scheduled_at:, from: nil, message_type: nil, metadata: nil)
+    def schedule(to:, text:, scheduled_at:, from: nil, message_type: nil, metadata: nil, idempotency_key: nil)
       validate_phone!(to)
       validate_text!(text)
       raise ValidationError, "scheduled_at is required" if scheduled_at.nil? || scheduled_at.empty?
@@ -369,7 +380,7 @@ module Sendly
       body[:messageType] = message_type if message_type
       body[:metadata] = metadata if metadata
 
-      client.post("/messages/schedule", body)
+      client.post("/messages/schedule", body, idempotency_key: idempotency_key)
     end
 
     # List scheduled messages
@@ -433,6 +444,8 @@ module Sendly
     # @param from [String] Sender ID or phone number (optional, applies to all)
     # @param message_type [String] Message type: "marketing" (default) or "transactional"
     # @param metadata [Hash] Shared metadata for all messages (max 4KB). Each message can also have its own metadata hash which takes priority.
+    # @param idempotency_key [String] Idempotency key for this operation
+    #   (1-255 printable ASCII characters, optional)
     # @return [Hash] Batch response with batch_id and status
     #
     # @raise [Sendly::ValidationError] If parameters are invalid
@@ -446,7 +459,7 @@ module Sendly
     #     ]
     #   )
     #   puts "Batch #{result['batchId']}: #{result['queued']} queued"
-    def send_batch(messages:, from: nil, message_type: nil, metadata: nil)
+    def send_batch(messages:, from: nil, message_type: nil, metadata: nil, idempotency_key: nil)
       raise ValidationError, "Messages array is required" if messages.nil? || messages.empty?
 
       messages.each_with_index do |msg, i|
@@ -464,7 +477,11 @@ module Sendly
       body[:messageType] = message_type if message_type
       body[:metadata] = metadata if metadata
 
-      client.post("/messages/batch", body)
+      # The batch endpoint dedupes header-less retries server-side by hashing
+      # the request content; an auto-generated key would bypass that net for
+      # identical cross-process re-runs, so only caller-supplied keys are sent.
+      client.post("/messages/batch", body, idempotency_key: idempotency_key,
+                                           auto_idempotency_key: false)
     end
 
     # Get batch status by ID

@@ -330,13 +330,13 @@ puts "Total: #{credits['balance']} credits"
 # View credit transaction history
 transactions = client.account.transactions
 transactions.each do |tx|
-  puts "#{tx['type']}: #{tx['amount']} credits - #{tx['description']}"
+  puts "#{tx.type}: #{tx.amount} credits - #{tx.description}"
 end
 
 # List API keys
 keys = client.account.api_keys
 keys.each do |key|
-  puts "#{key['name']}: #{key['prefix']}*** (#{key['type']})"
+  puts "#{key.name}: #{key.prefix} (#{key.type})"
 end
 
 # Create a new API key
@@ -457,20 +457,17 @@ client.campaigns.delete(campaign.id)
 Reusable message templates with variables. AI can also draft one for you.
 
 ```ruby
-# Create / list / get
+# Create / list / get. New templates start as drafts; publish to lock one for use.
 template = client.templates.create(
   name: "Order shipped",
-  body: "Hi {{name}}, order #{{order_id}} has shipped!",
-  is_published: true
+  text: "Hi {{name}}, order {{order_id}} has shipped!"
 )
-client.templates.list(type: "custom")[:templates].each { |t| puts t.name }
+client.templates.list[:templates].each { |t| puts "#{t.name} — #{t.status}" }
 t = client.templates.get(template.id)
 
-# Update, publish/unpublish, clone
-client.templates.update(template.id, body: "Hi {{name}}, your order is on the way!")
+# Update (drafts only), publish, delete
+client.templates.update(template.id, text: "Hi {{name}}, your order is on the way!")
 client.templates.publish(template.id)
-client.templates.unpublish(template.id)
-client.templates.clone(template.id, name: "Order shipped (copy)")
 client.templates.delete(template.id)
 
 # Generate a template with AI
@@ -1064,7 +1061,8 @@ Full enterprise docs: [sendly.live/docs/enterprise](https://sendly.live/docs/ent
 ## Requirements
 
 - Ruby 3.0+
-- Faraday 2.0+
+
+The client is built on Ruby's standard-library `net/http` and does not use Faraday at runtime. The gemspec still declares `faraday` and `faraday-retry` so this release does not drop a runtime dependency that callers may be resolving transitively. Both are unused and are slated for removal in the next major version.
 
 ## License
 

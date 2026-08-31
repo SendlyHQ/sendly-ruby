@@ -20,14 +20,26 @@ Gem::Specification.new do |spec|
   spec.metadata["documentation_uri"] = "https://sendly.live/docs"
 
   spec.files = Dir.chdir(__dir__) do
-    `git ls-files -z`.split("\x0").reject do |f|
-      (f == __FILE__) || f.match(%r{\A(?:(?:bin|test|spec|features)/|\.(?:git|travis|circleci)|appveyor)})
-    end
+    manifest = %w[
+      .ruby-version
+      CHANGELOG.md
+      Gemfile
+      Gemfile.lock
+      README.md
+      sendly.gemspec
+    ]
+    (manifest + Dir.glob(["lib/**/*.rb", "examples/**/*.rb"])).select do |f|
+      File.file?(f)
+    end.sort
   end
   spec.bindir        = "exe"
   spec.executables   = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
 
+  # @deprecated Unused. The client is built on Ruby's standard-library
+  #   net/http, which replaces both of these. They stay declared so this minor
+  #   release does not drop a runtime dependency that callers may be resolving
+  #   transitively; both are slated for removal in the next major version.
   spec.add_dependency "faraday", "~> 2.0"
   spec.add_dependency "faraday-retry", "~> 2.0"
 

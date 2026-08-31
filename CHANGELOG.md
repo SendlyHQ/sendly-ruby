@@ -1,5 +1,67 @@
 # sendly (Ruby)
 
+## 3.38.0
+
+### Minor Changes
+
+- **Every `POST` now sends an `Idempotency-Key` header.** The client generates one key per logical request (`sendly-ruby-retry-<uuid>`) and holds it across its own retries, so a request that already reached the server before a rate-limit retry is recognised as a repeat instead of being executed a second time. The server records a key only once the first attempt has finished, so this narrows the duplicate-send window rather than closing it: a retry that fires while the original is still running is not seen as a repeat. No code change is needed to get this. To extend the same protection across process restarts or your own retry loop, supply the key yourself:
+
+  ```ruby
+  client.messages.send(
+    to: "+15551234567",
+    text: "Your order shipped",
+    idempotency_key: "order-4821-shipped"
+  )
+  ```
+
+  Repeating a request with the same key inside 24 hours returns the original response instead of sending again. `idempotency_key:` is accepted on `messages.send` (the SMS, WhatsApp and RCS branches alike), `messages.send_group`, `messages.schedule`, `messages.send_batch`, and on `client.post` for any call you assemble by hand. A key must be 1 to 255 printable ASCII characters. Surrounding whitespace is trimmed, an empty or whitespace-only key is treated as if you passed nothing, and anything else raises `Sendly::ValidationError` before a request leaves the process.
+
+- **How keys behave across retries.** On a rate-limit retry the same key is reused. On a 5xx retry an auto-generated key is swapped for a fresh one, because the server responded, so the outcome is known and the retry should be a fresh attempt rather than a repeat of the failed one. The server does not record a 5xx against a key either. A key you supplied is never swapped, which is the whole point of supplying one. `messages.send_batch` is the deliberate exception: it sends no auto-generated key, because the batch endpoint already dedupes header-less retries by hashing the send itself and an auto key would step around that safety net. A key you pass to `send_batch` yourself is still sent. Worth knowing: this client raises `Sendly::TimeoutError` on a timeout rather than retrying, so a timeout is exactly the case where you should pass your own `idempotency_key:` before retrying by hand.
+
+- **Multipart uploads carry a key as well.** `media.upload`, the enterprise verification-document upload, and `business_upgrade.start` / `business_upgrade.resubmit` now attach an auto-generated `Idempotency-Key` to their uploads, so a retried document upload is far less likely to land twice. These methods generate the key internally and do not take an `idempotency_key:` argument yet.
+
+- **Templates were addressing a path the API does not serve. They now work.** Every method on `client.templates` other than `generate` pointed at `/verify/templates...`, which is not registered at any version of the API, so `list`, `get`, `create`, `update`, `delete` and `publish` could only ever raise `Sendly::NotFoundError`. They now address `/api/v1/templates`, which is served, and have been exercised end to end against production. If you wrote code against this resource and concluded it was broken, note carefully that it is live now: calls that previously failed without side effects will really create, edit, publish and delete templates.
+
+- **`Sendly::Template` now mirrors what the API actually returns**, and templates have a draft/published lifecycle. The response body field is `text`, not `body`, and a template carries `status` (`"draft"` or `"published"`, see the new `Sendly::Template::STATUSES`), `version`, `published_at`, `is_preset` and `preset_slug`. New templates are always created as drafts; call `publish` to make one usable. Only drafts can be edited, so an `update` on a published template is rejected by the API, and preset templates cannot be edited at all.
+
+  ```ruby
+  t = client.templates.create(name: "Order shipped", text: "Hi {{name}}, order {{order_id}} has shipped!")
+  t.status          # => "draft"
+  client.templates.publish(t.id)
+  client.templates.list[:templates].each { |x| puts "#{x.name}: #{x.status}" }
+  ```
+
+- **Template members that disappeared in the reshape are back, and deprecated.** If your editor or `ruby -w` starts pointing at these, this is why:
+  - `Template#body` is an alias of `#text`. Use `#text`.
+  - `Template#type` is derived from `#is_preset` and still returns `"preset"` or `"custom"`. Use `#is_preset` or `#preset?`. `Template::TYPES` is kept for the same reason.
+  - `Template#is_published` is derived from `#status`. Use `#status` or `#published?`.
+  - `Template#locale` is **always `nil`** and `Template#is_default` is **always `false`**. These are not deprecated in favour of anything: templates are not scoped by locale and the API has no concept of a default template, so it returns no such fields. There is no replacement. Keep per-locale wording in separate templates.
+
+  `Template#to_h` includes all of the above alongside the current fields, so hashes built from it keep their old keys.
+
+- **Deprecated template keyword arguments now raise instead of lying.** `templates.list` accepts `limit:`, `type:` and `locale:` again, and `templates.create` / `templates.update` accept `body:`, `locale:` and `is_published:` again, but the ones the API cannot honour raise `ArgumentError` with an explanation rather than silently doing nothing:
+  - `list(limit:)` and `list(type:)` raise: the list route returns every visible template in one response and neither paginates nor filters. Slice the returned array, or select over it with `Template#preset?` / `#custom?`. `list` still returns a `:pagination` key so existing destructuring does not blow up, but it is always `nil`.
+  - `locale:` raises everywhere it is accepted.
+  - `create(is_published: true)` and `update(is_published: true)` raise, and point you at `publish(id)`. `is_published: false` is accepted as a no-op, since templates are created as drafts and an update never changes status.
+  - `body:` on `create` and `update` is accepted and sent as `text`. Prefer `text:`.
+
+- **API key management was pointed at routes that do not exist.** `account.api_keys`, `account.api_key(id)` and `account.api_key_usage(id)` requested `/keys...`, which the versioned API does not serve, so they returned 404 no matter what. They now use `/account/keys...`. `account.api_keys` also unwraps the `keys` envelope the API returns, which it previously did not, so it now gives you the `Sendly::ApiKey` array its signature always promised.
+
+- **`account.revoke_api_key` could never revoke anything.** It sent `DELETE /account/keys/:id`, and that path is registered for `GET` only, so every revocation failed. It now sends `PATCH /account/keys/:id/revoke`, which is the verb the server accepts, takes an optional `reason:` recorded on the key's audit trail, and returns the `{ "id", "name", "revoked", "revokedAt" }` hash from the API instead of nothing. Treat this as live: code that has been calling it fruitlessly will now actually revoke keys.
+
+  ```ruby
+  client.account.revoke_api_key("key_abc123", reason: "rotated")
+  ```
+
+- **`account.transactions` raised `TypeError` on every call.** The endpoint returns `{ "transactions": [...] }` and the SDK mapped over that hash directly, so it tried to index an array with a string and blew up before you saw any data. It now unwraps the envelope and returns `Sendly::CreditTransaction` objects, or an empty array for an account with no history. One caveat: `offset:` is still accepted by the method but the endpoint ignores it, so it has no effect. `limit:` works and the server caps it at 100 (50 when omitted).
+
+- **Not fixed, so you are not left hunting:** `templates.unpublish` and `templates.clone` now address `/api/v1/templates/:id/unpublish` and `/api/v1/templates/:id/clone`, but the versioned API serves neither route, so both still fail with a 404. Their docs say so. To retire a published template today, create and publish a replacement and delete the old one; to copy one, read it with `get` and pass its `text` to `create`. Separately, `account.create_api_key` still fails with a 400: the API requires a `type` of `"test"` or `"live"` and the SDK does not send one. Mint keys from the dashboard until that is fixed.
+
+### Patch Changes
+
+- **`faraday` and `faraday-retry` are deprecated dependencies.** The client is built on Ruby's standard-library `net/http` and has not used Faraday at runtime for some time. Both gems stay declared in the gemspec so that this minor release does not pull a dependency out from under anyone resolving it transitively, but they are unused and are slated for removal in the next major version. The README no longer lists Faraday as a requirement.
+- The gem's packaged file list is now an explicit manifest plus `lib/**/*.rb` and `examples/**/*.rb`, rather than a `git ls-files` shell-out. The contents are unchanged, but building the gem from a source tree that is not a git checkout now produces the same gem instead of an empty one.
+
 ## 3.33.0
 
 ### Minor Changes
@@ -87,7 +149,7 @@
 
 - `/api/v1/enterprise/workspaces/:id/verification/submit` now returns specific missing-field errors (e.g. `"Missing required fields: website"`) instead of listing every required field whether present or not.
 - Endpoint accepts both flat and `{ verification: {...} }` wrapped shapes (matches `/enterprise/provision`).
-- `use_case` validation expanded from 23 entries to the full 43-value Telnyx enum.
+- `use_case` validation expanded from 23 entries to the full 43-value carrier use-case enum.
 
 ## 3.29.0
 
