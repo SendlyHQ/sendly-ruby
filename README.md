@@ -280,6 +280,32 @@ puts result.explanation  # what changed and why
 puts result.model        # model used (when available)
 ```
 
+## Idempotency
+
+Every POST carries an automatically generated `Idempotency-Key` header, held
+across the client's own rate-limit retries, so a retry of a request that
+already reached the API returns the original result instead of sending and
+charging again. Pass your own key (1-255 printable ASCII characters) when the
+guarantee needs to outlive the process, such as a job queue that re-runs after
+a crash or your own retry loop; `idempotency_key:` is accepted on
+`messages.send`, `send_group`, `schedule`, and `send_batch`.
+
+```ruby
+message = client.messages.send(
+  to: "+15551234567",
+  text: "Your order has shipped!",
+  idempotency_key: "order-4821-shipped"
+)
+```
+
+Repeating a request with the same key within 24 hours returns the original
+response; `send_batch` sends no automatic key, because the API already
+deduplicates identical batches by their contents. Note this client raises
+`Sendly::TimeoutError` instead of retrying a timeout, so a timeout is exactly
+when to retry with your own key.
+
+Full details: https://sendly.live/docs/idempotency
+
 ## Webhooks
 
 ```ruby
