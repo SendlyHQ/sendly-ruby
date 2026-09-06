@@ -1,5 +1,24 @@
 # sendly (Ruby)
 
+## Unreleased
+
+### Minor Changes
+
+- **RCS agent registration is self-serve from the SDK.** `client.rcs` gains `registration.get`, `dossier.get`, `brands.create` / `brands.update`, and `agents.create` / `get` / `update` / `set_test_devices` / `submit` / `request_launch`, mirroring the dashboard: draft the brand and agent, submit them for Sendly's review, invite test devices once the agent is in testing, then request launch. Reads need the `rcs:read` scope and writes `rcs:write`; test and live keys both work. Nested hashes (address, contact, basics, campaign, testing) accept snake_case or camelCase keys. Logo, hero and call-to-action media must be public `https://` URLs; assets cannot be uploaded over the API. New models: `Sendly::RcsRegistration` (with `CUSTOMER_STAGES`, `REVIEW_STATUSES` and `ERROR_CODES`), `Sendly::RcsDossier`, `Sendly::RcsBrand`, `Sendly::RcsAddress`, `Sendly::RcsContact`, `Sendly::RcsAgentRegistration`, `Sendly::RcsAgentBasics`, `Sendly::RcsAgentCampaign`, `Sendly::RcsCampaignInteraction`, `Sendly::RcsConsentSettings`, `Sendly::RcsOptInMethod`, `Sendly::RcsAgentTesting` and `Sendly::RcsTestDevice`. `Sendly::RcsAgent` (from `agents.list`) gains `stage`. Every route stays behind the RCS rollout: while it is off for your account these calls raise `Sendly::NotFoundError` with `rcs_not_enabled`.
+
+  ```ruby
+  dossier = client.rcs.dossier.get
+  brand = client.rcs.brands.create(**dossier.brand)
+  agent = client.rcs.agents.create(brand_id: brand.id, display_name: "Acme Coffee",
+                                   use_case: "MULTI_USE",
+                                   basics: { logo_url: "https://acme.example/rcs/logo.png" })
+  client.rcs.agents.submit(agent.id, idempotency_key: "rcs-submit-#{agent.id}")
+  ```
+
+- **`client.patch` and `client.put` accept `idempotency_key:`.** Neither generates a key on its own (unchanged), but a key you pass is now sent, so the RCS `update` and `set_test_devices` calls can be replayed safely.
+
+- **`Sendly::ValidationError#field_errors` carries the API's `errors` list** (`[{ "path", "message" }, ...]`) when a 400 or 422 response includes one, instead of always being `nil`. RCS registration uses it to say which brand, agent, campaign or device field needs attention.
+
 ## 3.38.0
 
 ### Minor Changes

@@ -872,9 +872,108 @@ recipients.
 
 The RCS channel is being rolled out gradually and is not yet generally
 available; until it is enabled for your account the endpoints read as
-absent and calls raise `Sendly::NotFoundError` (HTTP 404). RCS sends and
-capability checks require a live API key. RCS agents are registered by
-Sendly for your brand — contact support to set one up.
+absent and calls raise `Sendly::NotFoundError` (HTTP 404: `not_found` on
+sends and listing, `rcs_not_enabled` on registration). RCS sends and
+capability checks require a live API key.
+
+### Registering an agent
+
+Registration is self-serve, from the dashboard or the API. Draft the
+brand (the business) and the agent (what recipients see), submit them for
+Sendly's review, and once approved they go on to the carrier network for
+brand verification and agent review. The agent then reaches invited test
+devices only; when you have tested it, request launch and Sendly reviews
+the campaign before sending the launch on to the carrier network. Watch
+`customer_stage` (one of `Sendly::RcsRegistration::CUSTOMER_STAGES`) to
+see where a registration is.
+
+Registration reads need the `rcs:read` scope and writes `rcs:write`; test
+and live keys both work, since drafting is not carrier-backed. Logo, hero
+and call-to-action media must be public `https://` URLs: assets cannot be
+uploaded over the API, only from the dashboard. Nested hashes (address,
+contact, basics, campaign, testing) accept snake_case or camelCase keys.
+Every write accepts `idempotency_key:`; `POST`s get an auto-generated key
+as usual, while `PATCH` and `PUT` send one only when you pass it.
+
+```ruby
+# Where is the registration at?
+reg = client.rcs.registration.get
+puts reg.stage  # "draft" until something is submitted
+
+# Seed the brand from details Sendly already holds (your 10DLC brand or
+# toll-free verification), then fill in the rest
+dossier = client.rcs.dossier.get
+brand = client.rcs.brands.create(**dossier.brand)  # dossier.source: "tendlc", "verification" or "none"
+client.rcs.brands.update(brand.id,
+  display_name: "Acme Coffee",
+  legal_entity_type: "LIMITED_LIABILITY_COMPANY",
+  contact: { first_name: "Sam", last_name: "Lee", email: "sam@acme.example",
+             phone_number: "+15551234567" }
+)
+
+# Draft the agent. Media must be public https URLs.
+agent = client.rcs.agents.create(
+  brand_id: brand.id,
+  display_name: "Acme Coffee",
+  use_case: "MULTI_USE",
+  basics: {
+    description: "Order updates and offers from Acme Coffee",
+    logo_url: "https://acme.example/rcs/logo.png",
+    hero_url: "https://acme.example/rcs/hero.png",
+    brand_color: "#5B3A29",
+    privacy_policy_url: "https://acme.example/privacy",
+    terms_and_conditions_url: "https://acme.example/terms",
+    phone_number: { number: "+15551234567", label: "Support" }
+  }
+)
+
+# Submit for Sendly's review. Pass your own key if you may retry: a replay
+# returns the original response without submitting again.
+agent = client.rcs.agents.submit(agent.id, idempotency_key: "rcs-submit-#{agent.id}")
+puts agent.review_status  # "awaiting_review"
+
+# Later: poll, and act on a review note
+agent = client.rcs.agents.get(agent.id)
+if agent.changes_requested?
+  puts agent.review_note
+  client.rcs.agents.update(agent.id, basics: { hero_url: "https://acme.example/rcs/hero-v2.png" })
+end
+
+# Once the agent is in testing, invite devices, describe the campaign,
+# then request launch
+client.rcs.agents.set_test_devices(agent.id, devices: [
+  { phone_number: "+15557654321", label: "Sam's Pixel" }
+])
+client.rcs.agents.update(agent.id,
+  campaign: {
+    company_overview: "Specialty coffee roaster with three cafes in Austin",
+    agent_overview: "Order updates, pickup alerts and support replies",
+    interactions: [{ interaction_type: "TRANSACTIONAL_UPDATES",
+                     description: "Order and pickup status" }],
+    message_examples: ["Your order #4821 has shipped!",
+                       "Your latte is ready for pickup at 5th St",
+                       "Reply HELP for support or STOP to opt out"],
+    consent_settings: {
+      opt_in_methods: [{ method_type: "WEBSITE", description: "Checkbox at checkout" }],
+      call_to_action: "Get order updates by RCS",
+      call_to_action_url: "https://acme.example/updates",
+      double_opt_in: false,
+      help_response: "Acme Coffee: reply STOP to opt out, or email help@acme.example",
+      opt_out_response: "You're opted out of Acme Coffee updates."
+    }
+  }
+)
+client.rcs.agents.request_launch(agent.id, test_url: "https://acme.example/rcs-test")
+```
+
+Registration errors map onto the usual classes: `Sendly::NotFoundError`
+for `rcs_not_enabled` and `rcs_not_found`; `Sendly::ValidationError` for
+`rcs_us_only` and `rcs_invalid_content`, whose `field_errors` is the API's
+list of `{ "path", "message" }` hashes; and `Sendly::APIError` with
+`status_code` 409 for `rcs_field_locked`, `rcs_brand_not_verified` and
+`rcs_launch_not_ready`, or 403 for a key missing the scope.
+
+### Sending
 
 ```ruby
 # Discover your RCS agents ("testing" reaches invited test devices only;

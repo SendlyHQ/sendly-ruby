@@ -222,20 +222,28 @@ module Sendly
 
     # Make a PATCH request
     #
+    # No Idempotency-Key is generated for a PATCH; pass +idempotency_key+
+    # to send one (1-255 printable ASCII characters).
+    #
     # @param path [String] API path
     # @param body [Hash] Request body
+    # @param idempotency_key [String, nil] Caller-supplied idempotency key (optional)
     # @return [Hash] Response body
-    def patch(path, body = {})
-      request(:patch, path, body: body)
+    def patch(path, body = {}, idempotency_key: nil)
+      request(:patch, path, body: body, idempotency_key: idempotency_key)
     end
 
     # Make a PUT request
     #
+    # No Idempotency-Key is generated for a PUT; pass +idempotency_key+
+    # to send one (1-255 printable ASCII characters).
+    #
     # @param path [String] API path
     # @param body [Hash] Request body
+    # @param idempotency_key [String, nil] Caller-supplied idempotency key (optional)
     # @return [Hash] Response body
-    def put(path, body = {})
-      request(:put, path, body: body)
+    def put(path, body = {}, idempotency_key: nil)
+      request(:put, path, body: body, idempotency_key: idempotency_key)
     end
 
     # Make a DELETE request

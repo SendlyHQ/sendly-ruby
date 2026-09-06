@@ -47,7 +47,9 @@ module Sendly
 
   # Raised when the request contains invalid parameters
   class ValidationError < Error
-    # @return [Hash, nil] Field-specific validation errors
+    # @return [Array<Hash>, Hash, nil] Field-specific validation errors. For
+    #   API responses this is the +errors+ list from the body when present,
+    #   e.g. +[{ "path" => "brand.ein", "message" => "Enter a 9-digit EIN" }]+
     attr_reader :field_errors
 
     def initialize(message = "Validation failed", field_errors: nil, details: nil)
@@ -101,7 +103,7 @@ module Sendly
 
       case status
       when 400, 422
-        ValidationError.new(message, details: details)
+        ValidationError.new(message, details: details, field_errors: body["errors"])
       when 401
         AuthenticationError.new(message)
       when 402
