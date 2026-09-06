@@ -4,6 +4,9 @@
 
 ### Minor Changes
 
+- **`Sendly::ValidationError#field_errors` is now populated.** It was always `nil` before, because the API path never passed it. It now carries the response body's `errors` array on any 400 or 422, on every resource rather than just RCS: `client.contacts.import` already returns one, for example. Each entry is a Hash. Code that treats a truthy `field_errors` as "this only happens for X" should be rechecked.
+
+
 - **RCS agent registration is self-serve from the SDK.** `client.rcs` gains `registration.get`, `dossier.get`, `brands.create` / `brands.update`, and `agents.create` / `get` / `update` / `set_test_devices` / `submit` / `request_launch`, mirroring the dashboard: draft the brand and agent, submit them for Sendly's review, invite test devices once the agent is in testing, then request launch. Reads need the `rcs:read` scope and writes `rcs:write`; test and live keys both work. Nested hashes (address, contact, basics, campaign, testing) accept snake_case or camelCase keys. Logo, hero and call-to-action media must be public `https://` URLs; assets cannot be uploaded over the API. New models: `Sendly::RcsRegistration` (with `CUSTOMER_STAGES`, `REVIEW_STATUSES` and `ERROR_CODES`), `Sendly::RcsDossier`, `Sendly::RcsBrand`, `Sendly::RcsAddress`, `Sendly::RcsContact`, `Sendly::RcsAgentRegistration`, `Sendly::RcsAgentBasics`, `Sendly::RcsAgentCampaign`, `Sendly::RcsCampaignInteraction`, `Sendly::RcsConsentSettings`, `Sendly::RcsOptInMethod`, `Sendly::RcsAgentTesting` and `Sendly::RcsTestDevice`. `Sendly::RcsAgent` (from `agents.list`) gains `stage`. Every route stays behind the RCS rollout: while it is off for your account these calls raise `Sendly::NotFoundError` with `rcs_not_enabled`.
 
   ```ruby
