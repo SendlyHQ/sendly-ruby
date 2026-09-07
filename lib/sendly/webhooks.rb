@@ -36,9 +36,9 @@ module Sendly
 
     # Webhook event type string constants. Use these when subscribing
     # instead of string literals so you catch typos at load time.
-    EVENT_MESSAGE_QUEUED                = "message.queued"
     EVENT_MESSAGE_SENT                  = "message.sent"
     EVENT_MESSAGE_DELIVERED             = "message.delivered"
+    EVENT_MESSAGE_READ                  = "message.read"
     EVENT_MESSAGE_FAILED                = "message.failed"
     EVENT_MESSAGE_BOUNCED               = "message.bounced"
     EVENT_MESSAGE_RETRYING              = "message.retrying"
@@ -52,6 +52,11 @@ module Sendly
     EVENT_VERIFICATION_FAILED           = "verification.failed"
     EVENT_VERIFICATION_RESENT           = "verification.resent"
     EVENT_VERIFICATION_DELIVERY_FAILED  = "verification.delivery_failed"
+    EVENT_CONVERSATION_CREATED          = "conversation.created"
+    EVENT_CONVERSATION_UPDATED          = "conversation.updated"
+    EVENT_DRAFT_CREATED                 = "draft.created"
+    EVENT_DRAFT_APPROVED                = "draft.approved"
+    EVENT_DRAFT_REJECTED                = "draft.rejected"
     EVENT_CONTACT_AUTO_FLAGGED          = "contact.auto_flagged"
     EVENT_CONTACT_MARKED_VALID          = "contact.marked_valid"
     EVENT_CONTACTS_LOOKUP_COMPLETED     = "contacts.lookup_completed"
@@ -63,6 +68,12 @@ module Sendly
     EVENT_CAMPAIGN_SUSPENDED            = "campaign.suspended"
     EVENT_ASSIGNMENT_CONFIRMED          = "assignment.confirmed"
     EVENT_ASSIGNMENT_FAILED             = "assignment.failed"
+    EVENT_RCS_BRAND_VERIFIED            = "rcs_brand.verified"
+    EVENT_RCS_BRAND_FAILED              = "rcs_brand.failed"
+    EVENT_RCS_AGENT_TESTING             = "rcs_agent.testing"
+    EVENT_RCS_AGENT_LIVE                = "rcs_agent.live"
+    EVENT_RCS_AGENT_REJECTED            = "rcs_agent.rejected"
+    EVENT_RCS_AGENT_ACTION_REQUIRED     = "rcs_agent.action_required"
     EVENT_PORT_COMPLETED                = "port.completed"
     EVENT_PORT_OUT_REQUESTED            = "port_out.requested"
     EVENT_PORT_OUT_COMPLETED            = "port_out.completed"
@@ -72,6 +83,14 @@ module Sendly
     EVENT_NUMBER_FAILED                 = "number.failed"
     EVENT_NUMBER_REQUIREMENTS_REQUIRED  = "number.requirements_required"
     EVENT_NUMBER_RELEASED               = "number.released"
+    EVENT_WHATSAPP_ACCOUNT_CONNECTED    = "whatsapp_account.connected"
+    EVENT_WHATSAPP_ACCOUNT_FAILED       = "whatsapp_account.failed"
+    EVENT_WHATSAPP_TEMPLATE_APPROVED    = "whatsapp_template.approved"
+    EVENT_WHATSAPP_TEMPLATE_REJECTED    = "whatsapp_template.rejected"
+    EVENT_WHATSAPP_TEMPLATE_PAUSED      = "whatsapp_template.paused"
+    EVENT_CALL_STARTED                  = "call.started"
+    EVENT_CALL_COMPLETED                = "call.completed"
+    EVENT_CALL_RECORDING_READY          = "call.recording.ready"
 
     # Source of a list-health event. Frozen enum — new values will be
     # added in minor SDK versions, never removed.
