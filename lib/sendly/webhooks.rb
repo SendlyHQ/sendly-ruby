@@ -36,6 +36,10 @@ module Sendly
 
     # Webhook event type string constants. Use these when subscribing
     # instead of string literals so you catch typos at load time.
+    # Deprecated: the API has never emitted this and rejects it when you
+    # subscribe. It will be removed in the next major version.
+    EVENT_MESSAGE_QUEUED                = "message.queued"
+
     EVENT_MESSAGE_SENT                  = "message.sent"
     EVENT_MESSAGE_DELIVERED             = "message.delivered"
     EVENT_MESSAGE_READ                  = "message.read"
