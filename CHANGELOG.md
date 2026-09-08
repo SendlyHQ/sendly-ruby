@@ -2,7 +2,33 @@
 
 ## Unreleased
 
+### Breaking Changes
+
+- **A webhook that is not a message is no longer presented as one.** `parse_event` built a `Sendly::WebhookMessageData` out of every `data.object`, whatever the event was. For an `rcs_*`, `whatsapp_*`, `call.*`, `brand.*`, `campaign.*`, `assignment.*`, `number.*`, `port*`, `contact*`, `conversation.*` or `draft.*` payload that dropped every field the event actually carried — `agent_id`, `stage`, `port_request_id`, `duration_secs` and the rest were unreachable — and filled the gaps with message fields that were never sent. `event.data` is now a `Sendly::WebhookObject`, a hash-like view of `data.object`: read a key with `[]` (String or Symbol), a reader method of the same name, or `to_h`. `event.message` is the message view and is `nil` for all of the above; `message.*` events are unchanged, and `event.data` is still the `WebhookMessageData` there.
+
+  ```ruby
+  # before — "" for every RCS event, and the agent was unreachable
+  event.data.from
+  # after
+  event.data[:agent_id]   # => "bb22cc33-..."
+  event.message           # => nil
+  ```
+
+- **Absent fields are `nil` instead of a plausible-looking default.** `WebhookMessageData` defaulted `segments` to `1`, `credits_used` to `0`, `direction` to `"outbound"`, `from` to `""` and `id` to `""`, none of which a handler could tell from a real value. They are now `nil` when the payload did not carry them, and `data.key?(:segments)` says which case you are in. `WebhookVerificationData` loses the same kind of defaults (`delivery_status` `"queued"`, `attempts` `0`, `max_attempts` `3`), though nothing could reach that class before this release.
+
+- **JSON `null` survives as `nil`.** `from` and `to` on a `call.*` event are `null` for every in-app call; `from` used to arrive as `""`. Code branching on `from.empty?` should branch on `nil` now.
+
+- **`event.data.to_h` returns `data.object` as it arrived.** It used to return a compacted subset of the typed message fields, which dropped `text`, `metadata`, `media_urls`, `message_format` and `organization_id`, renamed `message_id` to `id`, and emitted the invented `segments`/`credits_used` defaults. `event.to_h[:data]` is the same hash. For a current-shape payload the familiar keys are all still there.
+
+- **`id` is no longer filled from an unrelated `id` key.** `contact.auto_flagged` carries the contact under `id` and the message that failed under `message_id`, so `event.data.message_id` returned the *contact* id — a handler that marked that message failed acted on the wrong row. Contact events have no message view at all now; read the message with `event.data[:message_id]`.
+
 ### Minor Changes
+
+- **`Sendly::WebhookEvent#raw_object`** carries `data.object` exactly as it arrived, for every event type, and **`#object_as(klass)`** reads it as a type of your choosing (`event.object_as(AgentLive)`). `#object` is an alias for `raw_object`.
+
+- **`Sendly::WebhookVerificationData` is reachable.** Nothing ever constructed it, and it read String keys while `parse_event` symbolizes names, so it could not have worked if anything had. `verification.*` events now build one, as `event.verification` and `event.data`, and every reader takes String or Symbol keys.
+
+- **`Sendly::WebhookEvent` gains `#message?` and `#verification?`** for the two cases that have a typed view.
 
 - **`Sendly::ValidationError#field_errors` is now populated.** It was always `nil` before, because the API path never passed it. It now carries the response body's `errors` array on any 400 or 422, on every resource rather than just RCS: `client.contacts.import` already returns one, for example. Each entry is a Hash. Code that treats a truthy `field_errors` as "this only happens for X" should be rechecked.
 

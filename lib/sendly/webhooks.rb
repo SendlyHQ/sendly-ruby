@@ -20,9 +20,13 @@ module Sendly
   #
   #         case event.type
   #         when 'message.delivered'
-  #           puts "Message delivered: #{event.data.id}"
+  #           puts "Message delivered: #{event.message.id}"
   #         when 'message.failed'
-  #           puts "Message failed: #{event.data.error}"
+  #           puts "Message failed: #{event.message.error}"
+  #         when 'rcs_agent.live'
+  #           # A lifecycle payload is not message-shaped. event.message is nil
+  #           # for it; read data.object through event.data or event.raw_object.
+  #           puts "RCS agent live: #{event.data[:agent_id]}"
   #         end
   #
   #         head :ok
@@ -186,17 +190,345 @@ module Sendly
     end
   end
 
-  class WebhookEvent
-    attr_reader :id, :type, :data, :created, :api_version, :livemode
+  # A hash-like view of a webhook event's +data.object+.
+  #
+  # Every key the payload carried is reachable — by +[]+ with a String or a
+  # Symbol, by {#to_h}, or as a reader method of the same name — and nothing
+  # else is. A key the payload did not carry is absent rather than filled in
+  # with a plausible-looking default, and a key that arrived as JSON +null+
+  # stays +nil+.
+  #
+  # @example An rcs_agent.live payload
+  #   event.data[:agent_id]    # => "bb22cc33-dd44-4e55-9f66-001122334455"
+  #   event.data.stage         # => "live"
+  #   event.data.key?(:from)   # => false — an RCS agent event has no from
+  class WebhookObject
+    include Enumerable
 
-    def initialize(data)
-      @id = data[:id]
-      @type = data[:type]
-      obj = data[:data][:object] || data[:data]
-      @data = WebhookMessageData.new(obj)
-      @created = data[:created] || data[:created_at] || 0
-      @api_version = data[:api_version] || '2024-01'
-      @livemode = data[:livemode] || false
+    # Names that must keep Ruby's meaning even if a payload carries them as a
+    # key. Overriding these on an instance breaks object identity, equality or
+    # dispatch, so a reader is never defined for them — reach those keys with
+    # +[]+, +fetch+ or +to_h+, which always read the payload.
+    RESERVED = %i[
+      __send__ __id__ object_id class singleton_class method methods
+      instance_variable_get instance_variable_set instance_variables
+      respond_to? equal? is_a? kind_of? instance_of? nil? tap raw
+    ].freeze
+
+    # @return [Hash] +data.object+ exactly as it arrived
+    attr_reader :raw
+
+    # @param raw [Hash] the parsed +data.object+
+    def initialize(raw = {})
+      @raw = raw.is_a?(Hash) ? raw : {}
+      define_payload_readers
+    end
+
+    # @param key [String, Symbol]
+    # @return [Object, nil] nil when the payload did not carry the key
+    def [](key)
+      resolved = resolve_key(key)
+      resolved.nil? ? nil : @raw[resolved]
+    end
+
+    # @param key [String, Symbol]
+    # @return [Object] the value, the default, or the block's result
+    # @raise [KeyError] if the key is absent and no default was given
+    def fetch(key, *default, &block)
+      resolved = resolve_key(key)
+      return @raw[resolved] unless resolved.nil?
+      return default.first unless default.empty?
+      return block.call(key) if block
+
+      raise KeyError, "key not found: #{key.inspect}"
+    end
+
+    def dig(key, *rest)
+      value = self[key]
+      return value if rest.empty? || value.nil?
+
+      value.dig(*rest)
+    end
+
+    # @return [Boolean] whether the payload carried this key at all. Use it to
+    #   tell "absent" from "arrived as null".
+    def key?(key)
+      !resolve_key(key).nil?
+    end
+    alias has_key? key?
+
+    def keys
+      @raw.keys
+    end
+
+    def values
+      @raw.values
+    end
+
+    def each(&block)
+      @raw.each(&block)
+    end
+
+    def empty?
+      @raw.empty?
+    end
+
+    def size
+      @raw.size
+    end
+    alias length size
+
+    # @return [Hash] a copy of +data.object+. Absent keys stay absent and
+    #   nulls stay nil; nothing is added.
+    def to_h
+      @raw.dup
+    end
+
+    def ==(other)
+      case other
+      when WebhookObject then @raw == other.raw
+      when Hash then @raw == other
+      else false
+      end
+    end
+
+    def inspect
+      "#<#{self.class.name} #{@raw.inspect}>"
+    end
+
+    # @return [Array<Symbol>] payload keys that cannot be read as a method
+    #   because doing so would override Ruby's own semantics. Read them with
+    #   +[]+ instead.
+    def reserved_keys
+      @raw.keys.map { |k| k.to_sym rescue nil }.compact & RESERVED
+    end
+
+    private
+
+    # Payload keys win over inherited methods.
+    #
+    # Reader access used to go through method_missing, which only fires when
+    # nothing else answers — so any key colliding with an Object or Enumerable
+    # method was silently shadowed. `contacts.bulk_marked_valid` really carries
+    # `count`, so `event.data.count` returned the NUMBER OF KEYS instead of the
+    # value, and respond_to?(:count) was true, giving the caller no signal.
+    # Defining a singleton reader per key makes the payload authoritative.
+    def define_payload_readers
+      singleton = singleton_class
+      @raw.each_key do |key|
+        name = begin
+          key.to_sym
+        rescue StandardError
+          next
+        end
+        next if RESERVED.include?(name)
+        next unless name.to_s.match?(/\A[A-Za-z_][A-Za-z0-9_]*[?!]?\z/)
+
+        singleton.define_method(name) { @raw[key] }
+      end
+    end
+
+    def resolve_key(key)
+      return key if @raw.key?(key)
+
+      case key
+      when Symbol then @raw.key?(key.to_s) ? key.to_s : nil
+      when String then @raw.key?(key.to_sym) ? key.to_sym : nil
+      end
+    end
+
+    def method_missing(name, *args, &block)
+      key = args.empty? && block.nil? ? resolve_key(name) : nil
+      return @raw[key] unless key.nil?
+
+      carries = @raw.empty? ? 'no fields' : @raw.keys.map(&:to_s).join(', ')
+      raise NoMethodError.new(
+        "undefined method '#{name}' for #{self.class.name}: " \
+        "this event's data.object carries #{carries}",
+        name
+      )
+    end
+
+    def respond_to_missing?(name, include_private = false)
+      !resolve_key(name).nil? || super
+    end
+  end
+
+  # The message view of +data.object+, built only for +message.*+ events.
+  #
+  # Readers return exactly what the payload carried. An absent field is +nil+:
+  # this class does not invent +segments+, +credits_used+, +direction+, +to+
+  # or +from+.
+  class WebhookMessageData < WebhookObject
+    attr_reader :id, :status, :to, :from, :direction, :organization_id,
+                :text, :error, :error_code, :delivered_at, :failed_at,
+                :created_at, :segments, :credits_used, :message_format,
+                :media_urls, :retry_count, :metadata, :batch_id
+
+    def initialize(data = {})
+      super
+      # Both spellings name the same message: the current payload shape uses
+      # `id`, the pre-`data.object` shape used `message_id`.
+      @id = self[:id] || self[:message_id]
+      @status = self[:status]
+      @to = self[:to]
+      @from = self[:from]
+      @direction = self[:direction]
+      @organization_id = self[:organization_id]
+      @text = self[:text]
+      @error = self[:error]
+      @error_code = self[:error_code]
+      @delivered_at = self[:delivered_at]
+      @failed_at = self[:failed_at]
+      @created_at = self[:created_at]
+      @segments = self[:segments]
+      @credits_used = self[:credits_used]
+      @message_format = self[:message_format]
+      @media_urls = self[:media_urls]
+      @retry_count = self[:retry_count]
+      @metadata = self[:metadata]
+      @batch_id = self[:batch_id]
+    end
+
+    # Backwards-compatible alias for {#id}.
+    def message_id
+      @id
+    end
+  end
+
+  # The verification view of +data.object+, built only for +verification.*+
+  # events. Readers carry what the payload held and nothing more.
+  class WebhookVerificationData < WebhookObject
+    attr_reader :id, :organization_id, :phone, :status, :delivery_status,
+                :attempts, :max_attempts, :expires_at, :verified_at,
+                :created_at, :app_name, :template_id, :profile_id, :metadata
+
+    def initialize(data = {})
+      super
+      @id = self[:id]
+      @organization_id = self[:organization_id]
+      @phone = self[:phone]
+      @status = self[:status]
+      @delivery_status = self[:delivery_status]
+      @attempts = self[:attempts]
+      @max_attempts = self[:max_attempts]
+      @expires_at = self[:expires_at]
+      @verified_at = self[:verified_at]
+      @created_at = self[:created_at]
+      @app_name = self[:app_name]
+      @template_id = self[:template_id]
+      @profile_id = self[:profile_id]
+      @metadata = self[:metadata]
+    end
+  end
+
+  # A parsed webhook event.
+  #
+  # {#raw_object} is +data.object+ exactly as it arrived, for every event type.
+  # {#data} adds a typed view on top of it where one applies: a
+  # {WebhookMessageData} for +message.*+, a {WebhookVerificationData} for
+  # +verification.*+, and a plain {WebhookObject} for everything else —
+  # +rcs_*+, +whatsapp_*+, +call.*+, +brand.*+, +campaign.*+, +assignment.*+,
+  # +number.*+, +port*+, +contact*+, +conversation.*+ and +draft.*+, whose
+  # payloads are not message-shaped.
+  #
+  # @example Handling a lifecycle event
+  #   case event.type
+  #   when Sendly::Webhooks::EVENT_MESSAGE_DELIVERED
+  #     puts event.message.id
+  #   when Sendly::Webhooks::EVENT_RCS_AGENT_LIVE
+  #     puts event.data[:agent_id]
+  #   end
+  class WebhookEvent
+    MESSAGE_EVENT_PREFIX = 'message.'
+
+    # message.opt_in and message.opt_out share the message.* prefix but carry
+    # an opt-out record ({phone_number, keyword, from_number, timestamp}), not
+    # a message. Treating them as messages produced a message view with every
+    # field nil, which is the invented-value problem this class removes.
+    NON_MESSAGE_MESSAGE_EVENTS = ['message.opt_in', 'message.opt_out'].freeze
+    VERIFICATION_EVENT_PREFIX = 'verification.'
+
+    # @return [String] event id, for idempotency
+    attr_reader :id
+
+    # @return [String] event type, verbatim — including one this SDK predates
+    attr_reader :type
+
+    # @return [Hash] +data.object+ exactly as it arrived, for every event type
+    attr_reader :raw_object
+
+    # @return [WebhookObject] hash-like view of +data.object+. A
+    #   {WebhookMessageData} for +message.*+ events and a
+    #   {WebhookVerificationData} for +verification.*+ events; a plain
+    #   {WebhookObject} otherwise.
+    attr_reader :data
+
+    # @return [WebhookMessageData, nil] the message view, or nil when this
+    #   event is not a message. Lifecycle events return nil rather than a
+    #   message struct full of invented values.
+    attr_reader :message
+
+    # @return [WebhookVerificationData, nil] the verification view, or nil
+    #   when this event is not a +verification.*+ event
+    attr_reader :verification
+
+    attr_reader :created, :api_version, :livemode
+
+    def initialize(payload)
+      env = payload.is_a?(WebhookObject) ? payload : WebhookObject.new(payload)
+
+      @id = env[:id]
+      @type = env[:type]
+      @raw_object = extract_object(env[:data])
+      @created = env[:created] || env[:created_at] || 0
+      @api_version = env[:api_version] || '2024-01'
+      @livemode = env[:livemode] || false
+
+      @message = message? ? WebhookMessageData.new(@raw_object) : nil
+      @verification = verification? ? WebhookVerificationData.new(@raw_object) : nil
+      @data = @message || @verification || WebhookObject.new(@raw_object)
+    end
+
+    # @return [Hash] alias for {#raw_object}
+    def object
+      @raw_object
+    end
+
+    # Read +data.object+ as a type of your choosing — the supported way to
+    # handle a lifecycle payload with a typed object.
+    #
+    # A Struct or Data class is filled from the members it declares, and the
+    # rest of the payload is ignored, so a field added to the event later
+    # cannot break the call. Any other class is handed +raw_object+ itself.
+    #
+    # @example
+    #   AgentLive = Struct.new(:agent_id, :name, :stage)
+    #   agent = event.object_as(AgentLive)   # => #<struct AgentLive ...>
+    #
+    # @param klass [Class] a Struct or Data class, or anything whose
+    #   initializer takes a Hash
+    # @return [Object]
+    def object_as(klass)
+      return klass.new(@raw_object) unless klass.respond_to?(:members)
+
+      values = klass.members.map { |member| @data[member] }
+      begin
+        klass.new(*values)
+      rescue ArgumentError
+        klass.new(**klass.members.zip(values).to_h)
+      end
+    end
+
+    # @return [Boolean] whether this event carries a message
+    def message?
+      @type.to_s.start_with?(MESSAGE_EVENT_PREFIX) &&
+        !NON_MESSAGE_MESSAGE_EVENTS.include?(@type.to_s)
+    end
+
+    # @return [Boolean] whether this event carries a verification
+    def verification?
+      @type.to_s.start_with?(VERIFICATION_EVENT_PREFIX)
     end
 
     def created_at
@@ -213,78 +545,14 @@ module Sendly
         livemode: @livemode
       }
     end
-  end
 
-  class WebhookMessageData
-    attr_reader :id, :status, :to, :from, :direction, :organization_id,
-                :text, :error, :error_code, :delivered_at, :failed_at,
-                :created_at, :segments, :credits_used, :message_format, :media_urls,
-                :retry_count, :metadata, :batch_id
+    private
 
-    def initialize(data)
-      @id = data[:id] || data[:message_id] || ''
-      @status = data[:status]
-      @to = data[:to]
-      @from = data[:from] || ''
-      @direction = data[:direction] || 'outbound'
-      @organization_id = data[:organization_id]
-      @text = data[:text]
-      @error = data[:error]
-      @error_code = data[:error_code]
-      @delivered_at = data[:delivered_at]
-      @failed_at = data[:failed_at]
-      @created_at = data[:created_at]
-      @segments = data[:segments] || 1
-      @credits_used = data[:credits_used] || 0
-      @message_format = data[:message_format]
-      @media_urls = data[:media_urls]
-      @retry_count = data[:retry_count]
-      @metadata = data[:metadata]
-      @batch_id = data[:batch_id]
-    end
+    def extract_object(data)
+      return {} unless data.is_a?(Hash)
 
-    def message_id
-      @id
-    end
-
-    def to_h
-      {
-        id: @id,
-        status: @status,
-        to: @to,
-        from: @from,
-        direction: @direction,
-        error: @error,
-        error_code: @error_code,
-        delivered_at: @delivered_at,
-        failed_at: @failed_at,
-        segments: @segments,
-        credits_used: @credits_used,
-        batch_id: @batch_id
-      }.compact
-    end
-  end
-
-  class WebhookVerificationData
-    attr_reader :id, :organization_id, :phone, :status, :delivery_status,
-                :attempts, :max_attempts, :expires_at, :verified_at,
-                :created_at, :app_name, :template_id, :profile_id, :metadata
-
-    def initialize(data = {})
-      @id = data["id"]
-      @organization_id = data["organization_id"]
-      @phone = data["phone"]
-      @status = data["status"]
-      @delivery_status = data["delivery_status"] || "queued"
-      @attempts = data["attempts"] || 0
-      @max_attempts = data["max_attempts"] || 3
-      @expires_at = data["expires_at"]
-      @verified_at = data["verified_at"]
-      @created_at = data["created_at"]
-      @app_name = data["app_name"]
-      @template_id = data["template_id"]
-      @profile_id = data["profile_id"]
-      @metadata = data["metadata"]
+      object = data.key?(:object) ? data[:object] : data['object']
+      object.is_a?(Hash) ? object : data
     end
   end
 end

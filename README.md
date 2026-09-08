@@ -308,6 +308,8 @@ Full details: https://sendly.live/docs/idempotency
 
 ## Webhooks
 
+### Managing endpoints
+
 ```ruby
 # Create a webhook endpoint
 webhook = client.webhooks.create(
@@ -339,6 +341,67 @@ rotation = client.webhooks.rotate_secret("whk_xxx")
 # Delete a webhook
 client.webhooks.delete("whk_xxx")
 ```
+
+### Receiving events
+
+`Sendly::Webhooks.parse_event` verifies the signature and returns a
+`Sendly::WebhookEvent`. Pass the raw request body — not a re-serialized hash,
+which would no longer match the signature.
+
+```ruby
+event = Sendly::Webhooks.parse_event(
+  request.raw_post,
+  request.headers["X-Sendly-Signature"],
+  ENV.fetch("SENDLY_WEBHOOK_SECRET"),
+  timestamp: request.headers["X-Sendly-Timestamp"]
+)
+```
+
+`event.raw_object` is `data.object` exactly as it arrived, for every event
+type. `event.data` is a hash-like view of the same object: read a key with
+`[]` (String or Symbol), a reader method of the same name, or `to_h`.
+
+```ruby
+case event.type
+when Sendly::Webhooks::EVENT_MESSAGE_DELIVERED
+  # message.* events also get a typed message view
+  puts "#{event.message.id} -> #{event.message.to}"
+when Sendly::Webhooks::EVENT_RCS_AGENT_LIVE
+  puts event.data[:agent_id]
+  puts event.data.stage
+when Sendly::Webhooks::EVENT_CALL_COMPLETED
+  puts event.data[:duration_secs]
+end
+
+# Or read data.object as a type of your own. A Struct or Data class is filled
+# from the members it declares and ignores the rest of the payload, so a field
+# added to the event later cannot break the call.
+AgentLive = Struct.new(:agent_id, :name, :stage)
+agent = event.object_as(AgentLive)
+```
+
+Two things the SDK will not do, because both make a handler act on data that
+was never sent:
+
+- **Nothing is invented.** A field the payload did not carry is `nil`, and
+  `event.data.key?(:segments)` is `false`. `segments`, `credits_used`,
+  `direction`, `to` and `from` are no longer defaulted to `1`, `0`,
+  `"outbound"` and `""`.
+- **`nil` stays `nil`.** An in-app `call.*` event carries `from` and `to` as
+  JSON `null`; they come back as `nil`, not `""`.
+
+`event.message` is the message view and is `nil` for every event that is not a
+message — `rcs_*`, `whatsapp_*`, `call.*`, `brand.*`, `campaign.*`,
+`assignment.*`, `number.*`, `port*`, `contact*`, `conversation.*` and
+`draft.*`, whose payloads are not message-shaped. `verification.*` events get
+`event.verification`, a `Sendly::WebhookVerificationData`. `event.data` is the
+typed view where one exists and a plain `Sendly::WebhookObject` otherwise, so
+reading `data.object` works the same way for all of them, including an event
+type this SDK predates.
+
+Note that `contact.auto_flagged` carries the contact under `id` and the message
+that failed under `message_id`; read the message with
+`event.data[:message_id]`.
 
 ## Account & Credits
 

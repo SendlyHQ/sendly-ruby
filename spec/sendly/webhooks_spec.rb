@@ -201,7 +201,11 @@ RSpec.describe Sendly::Webhooks do
         hash = event.to_h
         expect(hash[:id]).to eq('evt_123')
         expect(hash[:type]).to eq('message.delivered')
-        expect(hash[:data][:id]).to eq('msg_123')
+        # to_h reproduces data.object as it arrived: this payload carried
+        # message_id, so that is the key it comes back under.
+        expect(hash[:data][:message_id]).to eq('msg_123')
+        expect(hash[:data]).not_to have_key(:id)
+        expect(event.message.id).to eq('msg_123')
       end
 
       it 'converts event data to hash' do
@@ -223,10 +227,11 @@ RSpec.describe Sendly::Webhooks do
         event = Sendly::Webhooks.parse_event(payload, signature, webhook_secret)
 
         data_hash = event.data.to_h
-        expect(data_hash[:id]).to eq('msg_123')
+        expect(data_hash[:message_id]).to eq('msg_123')
         expect(data_hash[:status]).to eq('delivered')
         expect(data_hash[:segments]).to eq(2)
         expect(data_hash[:credits_used]).to eq(2)
+        expect(event.message.message_id).to eq('msg_123')
       end
     end
 
@@ -447,11 +452,15 @@ RSpec.describe Sendly::Webhooks do
 
       message_data = Sendly::WebhookMessageData.new(data)
 
-      expect(message_data.from).to eq('')
+      # A field the payload did not carry is nil. It is never substituted with
+      # a plausible-looking default ("" for from, 1 for segments, 0 for
+      # credits_used), which a handler cannot tell from a real value.
+      expect(message_data.from).to be_nil
       expect(message_data.error).to be_nil
       expect(message_data.error_code).to be_nil
-      expect(message_data.segments).to eq(1)
-      expect(message_data.credits_used).to eq(0)
+      expect(message_data.segments).to be_nil
+      expect(message_data.credits_used).to be_nil
+      expect(message_data.key?(:from)).to be false
     end
 
     it 'includes error fields for failed messages' do
@@ -470,6 +479,146 @@ RSpec.describe Sendly::Webhooks do
       expect(message_data.error).to eq('Invalid phone number')
       expect(message_data.error_code).to eq('INVALID_PHONE')
       expect(message_data.failed_at).to eq('2025-01-15T10:00:00Z')
+    end
+  end
+
+  describe 'lifecycle events' do
+    def parse(type, object)
+      payload = {
+        id: 'evt_lifecycle',
+        type: type,
+        api_version: '2024-01',
+        created: 1_767_225_600,
+        livemode: true,
+        data: { object: object }
+      }.to_json
+
+      Sendly::Webhooks.parse_event(
+        payload,
+        Sendly::Webhooks.generate_signature(payload, webhook_secret),
+        webhook_secret
+      )
+    end
+
+    # Regression: data.object used to be coerced into a message struct, so an
+    # RCS, WhatsApp, voice, 10DLC, number or porting payload was unreadable —
+    # every field of its own was dropped and message fields were invented in
+    # their place.
+    it 'exposes data.object for an event that is not message-shaped' do
+      event = parse('rcs_agent.live',
+                    agent_id: 'agt_1', name: 'Acme Support', stage: 'live',
+                    organization_id: 'org_1')
+
+      expect(event.raw_object[:agent_id]).to eq('agt_1')
+      expect(event.object).to eq(event.raw_object)
+      expect(event.data[:stage]).to eq('live')
+      expect(event.data['stage']).to eq('live')
+      expect(event.data.name).to eq('Acme Support')
+      expect(event.data.to_h).to eq(event.raw_object)
+    end
+
+    it 'has no message view for a lifecycle event' do
+      event = parse('rcs_agent.live', agent_id: 'agt_1', stage: 'live')
+
+      expect(event.message).to be_nil
+      expect(event.message?).to be false
+      expect(event.data).to be_a(Sendly::WebhookObject)
+      expect(event.data).not_to be_a(Sendly::WebhookMessageData)
+    end
+
+    it 'invents no message fields' do
+      event = parse('number.activated',
+                    id: 'num_1', phone: '+15555550188', status: 'active')
+
+      %i[to from direction segments credits_used].each do |field|
+        expect(event.data.key?(field)).to be false
+        expect(event.data).not_to respond_to(field)
+        expect { event.data.public_send(field) }.to raise_error(NoMethodError)
+      end
+    end
+
+    it 'keeps a null from a call event null' do
+      event = parse('call.started',
+                    id: 'call_1', from: nil, to: nil, hangup_class: nil,
+                    status: 'active')
+
+      expect(event.data[:from]).to be_nil
+      expect(event.data[:to]).to be_nil
+      expect(event.data.key?(:from)).to be true
+      expect(event.data.key?(:hangup_class)).to be true
+      expect(event.data.to_h).to have_key(:hangup_class)
+    end
+
+    # The dangerous one: contact.auto_flagged carries the contact under `id`
+    # and the message that failed under `message_id`. Reading the contact id as
+    # the message id makes a handler act on the wrong row.
+    it 'does not read a contact id as a message id' do
+      event = parse('contact.auto_flagged',
+                    id: 'contact_1', phone_number: '+15555550144',
+                    invalid_reason: 'landline', source: 'send_failure',
+                    message_id: 'msg_9', error_code: 'E003')
+
+      expect(event.data[:id]).to eq('contact_1')
+      expect(event.data[:message_id]).to eq('msg_9')
+      expect(event.message).to be_nil
+    end
+
+    it 'exposes an event type this SDK predates' do
+      event = parse('something.invented_later',
+                    id: 'obj_1', some_new_field: 'a value no SDK has a type for')
+
+      expect(event.type).to eq('something.invented_later')
+      expect(event.data[:some_new_field]).to eq('a value no SDK has a type for')
+      expect(event.message).to be_nil
+    end
+
+    it 'reads data.object into a type of your choosing' do
+      agent = Struct.new(:agent_id, :name, :stage)
+      keyword_agent = Struct.new(:agent_id, :stage, keyword_init: true)
+      event = parse('rcs_agent.live',
+                    agent_id: 'agt_1', name: 'Acme Support', stage: 'live',
+                    organization_id: 'org_1', field_added_later: 42)
+
+      # A member the payload does not carry is nil, and a field this struct
+      # does not declare is ignored rather than raising.
+      expect(event.object_as(agent).stage).to eq('live')
+      expect(event.object_as(agent).agent_id).to eq('agt_1')
+      expect(event.object_as(keyword_agent).stage).to eq('live')
+    end
+
+    it 'hands a plain class the whole object' do
+      holder = Class.new do
+        attr_reader :object
+
+        def initialize(object)
+          @object = object
+        end
+      end
+      event = parse('rcs_agent.live', agent_id: 'agt_1', stage: 'live')
+
+      expect(event.object_as(holder).object).to eq(agent_id: 'agt_1', stage: 'live')
+    end
+
+    it 'builds a verification view for verification.* events' do
+      event = parse('verification.verified',
+                    id: 'ver_1', phone: '+15555550123', status: 'verified',
+                    delivery_status: 'delivered', attempts: 1, max_attempts: 3,
+                    app_name: 'Acme Login')
+
+      expect(event.verification).to be_a(Sendly::WebhookVerificationData)
+      expect(event.verification?).to be true
+      expect(event.data).to be(event.verification)
+      expect(event.verification.phone).to eq('+15555550123')
+      expect(event.verification.app_name).to eq('Acme Login')
+      expect(event.message).to be_nil
+    end
+
+    it 'invents no verification defaults' do
+      event = parse('verification.created', id: 'ver_1', phone: '+15555550123')
+
+      expect(event.verification.delivery_status).to be_nil
+      expect(event.verification.attempts).to be_nil
+      expect(event.verification.max_attempts).to be_nil
     end
   end
 end
