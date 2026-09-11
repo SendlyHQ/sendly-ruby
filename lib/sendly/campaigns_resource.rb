@@ -131,7 +131,7 @@ module Sendly
     end
 
     def get(id)
-      response = @client.get("/campaigns/#{id}")
+      response = @client.get("/campaigns/#{URI.encode_www_form_component(id)}")
       Campaign.new(response)
     end
 
@@ -142,21 +142,21 @@ module Sendly
       body[:templateId] = template_id unless template_id.nil?
       body[:contactListIds] = contact_list_ids if contact_list_ids
 
-      response = @client.patch("/campaigns/#{id}", body)
+      response = @client.patch("/campaigns/#{URI.encode_www_form_component(id)}", body)
       Campaign.new(response)
     end
 
     def delete(id)
-      @client.delete("/campaigns/#{id}")
+      @client.delete("/campaigns/#{URI.encode_www_form_component(id)}")
     end
 
     def preview(id)
-      response = @client.get("/campaigns/#{id}/preview")
+      response = @client.get("/campaigns/#{URI.encode_www_form_component(id)}/preview")
       CampaignPreview.new(response)
     end
 
     def send_campaign(id)
-      response = @client.post("/campaigns/#{id}/send")
+      response = @client.post("/campaigns/#{URI.encode_www_form_component(id)}/send")
       Campaign.new(response)
     end
 
@@ -164,17 +164,17 @@ module Sendly
       body = { scheduledAt: scheduled_at }
       body[:timezone] = timezone if timezone
 
-      response = @client.post("/campaigns/#{id}/schedule", body)
+      response = @client.post("/campaigns/#{URI.encode_www_form_component(id)}/schedule", body)
       Campaign.new(response)
     end
 
     def cancel(id)
-      response = @client.post("/campaigns/#{id}/cancel")
+      response = @client.post("/campaigns/#{URI.encode_www_form_component(id)}/cancel")
       Campaign.new(response)
     end
 
     def clone(id)
-      response = @client.post("/campaigns/#{id}/clone")
+      response = @client.post("/campaigns/#{URI.encode_www_form_component(id)}/clone")
       Campaign.new(response)
     end
   end

@@ -129,7 +129,7 @@ module Sendly
     end
 
     def get(id)
-      response = @client.get("/templates/#{id}")
+      response = @client.get("/templates/#{URI.encode_www_form_component(id)}")
       Template.new(response)
     end
 
@@ -198,16 +198,16 @@ module Sendly
       request_body[:name] = name if name
       request_body[:text] = content if content
 
-      response = @client.patch("/templates/#{id}", request_body)
+      response = @client.patch("/templates/#{URI.encode_www_form_component(id)}", request_body)
       Template.new(response)
     end
 
     def delete(id)
-      @client.delete("/templates/#{id}")
+      @client.delete("/templates/#{URI.encode_www_form_component(id)}")
     end
 
     def publish(id)
-      response = @client.post("/templates/#{id}/publish")
+      response = @client.post("/templates/#{URI.encode_www_form_component(id)}/publish")
       Template.new(response)
     end
 
@@ -217,7 +217,7 @@ module Sendly
     #   this call fails with a 404. To retire a published template today,
     #   {#create} and {#publish} a replacement, then {#delete} this one.
     def unpublish(id)
-      response = @client.post("/templates/#{id}/unpublish")
+      response = @client.post("/templates/#{URI.encode_www_form_component(id)}/unpublish")
       Template.new(response)
     end
 
@@ -229,7 +229,7 @@ module Sendly
     def clone(id, name: nil)
       body = {}
       body[:name] = name if name
-      response = @client.post("/templates/#{id}/clone", body)
+      response = @client.post("/templates/#{URI.encode_www_form_component(id)}/clone", body)
       Template.new(response)
     end
 

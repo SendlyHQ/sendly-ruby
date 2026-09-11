@@ -342,6 +342,16 @@ rotation = client.webhooks.rotate_secret("whk_xxx")
 client.webhooks.delete("whk_xxx")
 ```
 
+Subscribe with the `Sendly::Webhooks::EVENT_*` constants rather than string
+literals — a typo then fails at load time instead of in a 400. Every constant
+but one names an event the API accepts on subscribe. The exception is
+`EVENT_MESSAGE_QUEUED`: `message.queued` has never been emitted and is
+rejected on subscribe with a 400 (`Sendly::ValidationError`). It is
+deprecated, kept only so existing code still loads, and will be removed in the
+next major. `message.undelivered` is rejected in the same way and has never had
+a constant here. Subscribe to `message.sent`, `message.failed` and
+`message.bounced` instead.
+
 ### Receiving events
 
 `Sendly::Webhooks.parse_event` verifies the signature and returns a
@@ -402,6 +412,66 @@ type this SDK predates.
 Note that `contact.auto_flagged` carries the contact under `id` and the message
 that failed under `message_id`; read the message with
 `event.data[:message_id]`.
+
+### Handling a lifecycle event
+
+Only `message.*` events carry a message. A lifecycle event — `rcs_*`,
+`whatsapp_*`, `call.*`, `brand.*`, `campaign.*`, `assignment.*`, `number.*`,
+`port*`, `contact*`, `conversation.*`, `draft.*` — carries a different object,
+so `event.message` is `nil` and you read `data.object` off `event.data` or
+`event.raw_object`.
+
+```ruby
+require "sendly"
+
+# Framework-neutral: hand it the raw request body and a headers Hash.
+def handle_sendly_webhook(raw_body, headers)
+  event = Sendly::Webhooks.parse_event(
+    raw_body,
+    headers["X-Sendly-Signature"],
+    ENV.fetch("SENDLY_WEBHOOK_SECRET"),
+    timestamp: headers["X-Sendly-Timestamp"]
+  )
+
+  case event.type
+  when Sendly::Webhooks::EVENT_RCS_AGENT_LIVE
+    # data.object is the agent: agent_id, name, stage
+    puts "RCS agent #{event.data[:name]} is #{event.data.stage}"
+    puts event.data[:agent_id]
+  when Sendly::Webhooks::EVENT_NUMBER_ACTIVATED
+    # data.object is the number: id, phone, status, country_code, source
+    puts "#{event.data[:phone]} active in #{event.data[:country_code]}"
+  when Sendly::Webhooks::EVENT_CONTACT_AUTO_FLAGGED
+    # the contact is `id`; the message that failed is `message_id`
+    puts "flagged #{event.data[:id]} (#{event.data[:invalid_reason]})"
+    puts "from message #{event.data[:message_id]}"
+  when Sendly::Webhooks::EVENT_MESSAGE_DELIVERED
+    # message.* events, and only these, also get the typed message view
+    puts "#{event.message.id} delivered to #{event.message.to}"
+  else
+    # An event type this SDK predates still parses; raw_object holds all of it.
+    puts "unhandled #{event.type}: #{event.raw_object.inspect}"
+  end
+
+  :ok
+rescue Sendly::WebhookSignatureError
+  :unauthorized
+end
+```
+
+Reading a message field off a lifecycle event fails loudly rather than
+answering with a value the event never carried:
+
+```ruby
+event.data.from
+# => NoMethodError: undefined method 'from' for Sendly::WebhookObject:
+#    this event's data.object carries agent_id, name, stage, organization_id
+event.message      # => nil
+event.message.id   # => NoMethodError — nil has no #id
+```
+
+Branch on `event.type`, or on `event.message?` / `event.verification?`, before
+reaching for a typed view.
 
 ## Account & Credits
 

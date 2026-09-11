@@ -1,6 +1,8 @@
 # sendly (Ruby)
 
-## Unreleased
+## 4.0.0
+
+**Upgrading from 3.40.0:** that release already contained the breaking changes below, published by mistake as a minor version. 4.0.0 carries them under the correct major. Relative to 3.40.0, the only new changes are under **Security**.
 
 ### Breaking Changes
 
@@ -21,6 +23,120 @@
 - **`event.data.to_h` returns `data.object` as it arrived.** It used to return a compacted subset of the typed message fields, which dropped `text`, `metadata`, `media_urls`, `message_format` and `organization_id`, renamed `message_id` to `id`, and emitted the invented `segments`/`credits_used` defaults. `event.to_h[:data]` is the same hash. For a current-shape payload the familiar keys are all still there.
 
 - **`id` is no longer filled from an unrelated `id` key.** `contact.auto_flagged` carries the contact under `id` and the message that failed under `message_id`, so `event.data.message_id` returned the *contact* id — a handler that marked that message failed acted on the wrong row. Contact events have no message view at all now; read the message with `event.data[:message_id]`.
+
+### Migrating from 3.x
+
+Nothing outside webhook handling changed. The client, every resource and every
+`message.*` handler you already have keep working as written; the list below is
+the whole edit.
+
+**1. Reading a message field off a lifecycle event now raises.** 3.x decoded
+every `data.object` into a `Sendly::WebhookMessageData`, so an `rcs_agent.live`
+handler that asked for `event.data.from` was handed `""`, `event.data.segments`
+`1` and `event.data.credits_used` `0` — values the event never carried, not
+distinguishable from real ones, and no error was raised. The same calls raise
+`NoMethodError` in 4.0, naming the keys that did arrive. That failure is the
+point of this release rather than an accident of it: the value it replaces was
+wrong, and silently so.
+
+```ruby
+# 3.x — silently wrong, on every RCS event
+event.data.from       # => ""
+event.data.segments   # => 1
+
+# 4.0 — the same call
+event.data.from
+# => NoMethodError: undefined method 'from' for Sendly::WebhookObject:
+#    this event's data.object carries agent_id, name, stage, organization_id
+
+# 4.0 — the edit: read the object the event actually carries
+event.data[:agent_id]   # => "bb22cc33-dd44-4e55-9f66-001122334455"
+event.data.stage        # => "live"
+event.raw_object        # => the whole data.object Hash, untouched
+```
+
+**2. `event.data` is a message view only on `message.*` events.** In 3.x it was
+a `WebhookMessageData` whatever the event was, so `event.data.id` and
+`event.data.status` answered for anything — with the payload's value when the
+key happened to exist, and with `''` or `nil` when it did not. In 4.0 a
+lifecycle event's `event.data` is a `Sendly::WebhookObject`: the keys the
+payload carried are readable and nothing else is. `event.message` is new in 4.0
+and is the message view; it is `nil` outside `message.*`, so guard it with
+`event.message?` rather than calling into it unconditionally.
+
+```ruby
+# 3.x — answered for every event type; "" when the payload had no id
+mark_delivered(event.data.id)
+
+# 4.0 — split the branches
+case event.type
+when Sendly::Webhooks::EVENT_MESSAGE_DELIVERED
+  mark_delivered(event.message.id)         # same value as 3.x
+when Sendly::Webhooks::EVENT_NUMBER_ACTIVATED
+  number_active(event.data[:id])           # the number's id, as it always was
+when Sendly::Webhooks::EVENT_RCS_AGENT_LIVE
+  agent_went_live(event.data[:agent_id])   # unreachable in 3.x
+end
+```
+
+**3. `contact.auto_flagged` no longer reports the contact as the message.** The
+payload carries the contact under `id` and the message that failed under
+`message_id`; 3.x filled the message view's `id` from the contact, so a handler
+that marked "the message" failed acted on the wrong record.
+
+```ruby
+# 3.x — the CONTACT id, presented as a message id
+event.data.message_id    # => "ct_9"
+
+# 4.0
+event.data[:id]          # => "ct_9"    the contact
+event.data[:message_id]  # => "msg_77"  the message that failed
+event.message            # => nil
+```
+
+**4. Message fields the payload omitted are `nil`, not a default.** On a
+`message.*` event the readers still exist, so this raises nothing — it changes
+what you get. `key?` separates "absent" from "arrived as null".
+
+```ruby
+# message.delivered, on a payload that carried no segments
+event.data.segments          # 3.x => 1           4.0 => nil
+event.data.credits_used      # 3.x => 0           4.0 => nil
+event.data.direction         # 3.x => "outbound"  4.0 => nil
+event.data.key?(:segments)   # => false when absent, true when it arrived as null
+```
+
+**5. `event.data.to_h` is now `data.object` as it arrived.** It used to be a
+compacted subset of the typed message fields, dropping `text`, `metadata`,
+`media_urls`, `message_format` and `organization_id` and renaming `message_id`
+to `id`. Code that persisted `to_h` will start seeing the full object.
+
+```ruby
+event.data.to_h == event.raw_object   # => true, for every event type
+```
+
+**6. If you want a typed object for a lifecycle event, ask for one.**
+`#object_as` fills a Struct or Data class from the members it declares and
+ignores the rest of the payload, so a field added to the event later cannot
+break the call.
+
+```ruby
+AgentLive = Struct.new(:agent_id, :name, :stage)
+agent = event.object_as(AgentLive)
+agent.stage   # => "live"
+```
+
+### Deprecations
+
+- **`Sendly::Webhooks::EVENT_MESSAGE_QUEUED` is deprecated.** The API has never
+  emitted `message.queued`, and subscribing to it fails: `client.webhooks.create`
+  and `client.webhooks.update` reject any event outside the API's list with a
+  400, raised here as `Sendly::ValidationError`. The constant stays exported in
+  4.0 so existing code still loads, and will be removed in the next major.
+  `message.undelivered` is rejected on subscribe the same way and has never had
+  a constant in this SDK. Subscribe to `message.sent`, `message.failed` and
+  `message.bounced` instead. Every other `EVENT_*` constant matches the API's
+  list exactly.
 
 ### Minor Changes
 
@@ -47,6 +163,11 @@
 - **`client.patch` and `client.put` accept `idempotency_key:`.** Neither generates a key on its own (unchanged), but a key you pass is now sent, so the RCS `update` and `set_test_devices` calls can be replayed safely.
 
 - **`Sendly::ValidationError#field_errors` carries the API's `errors` list** (`[{ "path", "message" }, ...]`) when a 400 or 422 response includes one, instead of always being `nil`. RCS registration uses it to say which brand, agent, campaign or device field needs attention.
+
+
+### Security
+
+- **Path parameters are percent-encoded.** Every id you pass is now encoded (`URI.encode_www_form_component`) before it goes into the request path. An id containing `/`, `?` or `#` used to change which endpoint the request reached: an id of `../../account/keys` left its collection and hit another endpoint carrying your API key. Ordinary ids are sent byte-for-byte as before.
 
 ## 3.38.0
 

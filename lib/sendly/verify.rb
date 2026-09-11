@@ -181,17 +181,17 @@ module Sendly
     end
 
     def resend(id)
-      response = @client.post("/verify/#{id}/resend")
+      response = @client.post("/verify/#{URI.encode_www_form_component(id)}/resend")
       SendVerificationResponse.new(response)
     end
 
     def check(id, code:)
-      response = @client.post("/verify/#{id}/check", { code: code })
+      response = @client.post("/verify/#{URI.encode_www_form_component(id)}/check", { code: code })
       CheckVerificationResponse.new(response)
     end
 
     def get(id)
-      response = @client.get("/verify/#{id}")
+      response = @client.get("/verify/#{URI.encode_www_form_component(id)}")
       Verification.new(response)
     end
 

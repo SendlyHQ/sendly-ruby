@@ -51,7 +51,7 @@ module Sendly
     # @return [Sendly::Webhook]
     def get(webhook_id)
       validate_webhook_id!(webhook_id)
-      response = @client.get("/webhooks/#{webhook_id}")
+      response = @client.get("/webhooks/#{URI.encode_www_form_component(webhook_id)}")
       Webhook.new(response)
     end
 
@@ -77,7 +77,7 @@ module Sendly
       body[:mode] = mode unless mode.nil?
       body[:metadata] = metadata unless metadata.nil?
 
-      response = @client.patch("/webhooks/#{webhook_id}", body)
+      response = @client.patch("/webhooks/#{URI.encode_www_form_component(webhook_id)}", body)
       Webhook.new(response)
     end
 
@@ -87,7 +87,7 @@ module Sendly
     # @return [void]
     def delete(webhook_id)
       validate_webhook_id!(webhook_id)
-      @client.delete("/webhooks/#{webhook_id}")
+      @client.delete("/webhooks/#{URI.encode_www_form_component(webhook_id)}")
       nil
     end
 
@@ -97,7 +97,7 @@ module Sendly
     # @return [Sendly::WebhookTestResult]
     def test(webhook_id)
       validate_webhook_id!(webhook_id)
-      response = @client.post("/webhooks/#{webhook_id}/test")
+      response = @client.post("/webhooks/#{URI.encode_www_form_component(webhook_id)}/test")
       WebhookTestResult.new(response)
     end
 
@@ -107,7 +107,7 @@ module Sendly
     # @return [Hash] Reset confirmation with updated webhook
     def reset_circuit(webhook_id)
       validate_webhook_id!(webhook_id)
-      @client.post("/webhooks/#{webhook_id}/reset-circuit")
+      @client.post("/webhooks/#{URI.encode_www_form_component(webhook_id)}/reset-circuit")
     end
 
     # Replay failed or cancelled webhook deliveries from the audit log.
@@ -133,7 +133,7 @@ module Sendly
       body[:event_types] = event_types unless event_types.nil?
       body[:statuses] = statuses unless statuses.nil?
       body[:limit] = limit unless limit.nil?
-      @client.post("/webhooks/#{webhook_id}/redeliver", body)
+      @client.post("/webhooks/#{URI.encode_www_form_component(webhook_id)}/redeliver", body)
     end
 
     # Backfill missed webhook events from the underlying message log.
@@ -157,7 +157,7 @@ module Sendly
       body[:until] = until_ unless until_.nil?
       body[:event_types] = event_types unless event_types.nil?
       body[:limit] = limit unless limit.nil?
-      @client.post("/webhooks/#{webhook_id}/backfill", body)
+      @client.post("/webhooks/#{URI.encode_www_form_component(webhook_id)}/backfill", body)
     end
 
     # Rotate the webhook signing secret
@@ -166,7 +166,7 @@ module Sendly
     # @return [Sendly::WebhookSecretRotation]
     def rotate_secret(webhook_id)
       validate_webhook_id!(webhook_id)
-      response = @client.post("/webhooks/#{webhook_id}/rotate-secret")
+      response = @client.post("/webhooks/#{URI.encode_www_form_component(webhook_id)}/rotate-secret")
       WebhookSecretRotation.new(response)
     end
 
@@ -176,7 +176,7 @@ module Sendly
     # @return [Array<Sendly::WebhookDelivery>]
     def deliveries(webhook_id)
       validate_webhook_id!(webhook_id)
-      response = @client.get("/webhooks/#{webhook_id}/deliveries")
+      response = @client.get("/webhooks/#{URI.encode_www_form_component(webhook_id)}/deliveries")
       response.map { |data| WebhookDelivery.new(data) }
     end
 
@@ -188,7 +188,7 @@ module Sendly
     def retry_delivery(webhook_id, delivery_id)
       validate_webhook_id!(webhook_id)
       validate_delivery_id!(delivery_id)
-      @client.post("/webhooks/#{webhook_id}/deliveries/#{delivery_id}/retry")
+      @client.post("/webhooks/#{URI.encode_www_form_component(webhook_id)}/deliveries/#{URI.encode_www_form_component(delivery_id)}/retry")
       nil
     end
 

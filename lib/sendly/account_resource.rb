@@ -55,7 +55,7 @@ module Sendly
     # @param key_id [String] API key ID
     # @return [Sendly::ApiKey]
     def api_key(key_id)
-      response = @client.get("/account/keys/#{key_id}")
+      response = @client.get("/account/keys/#{URI.encode_www_form_component(key_id)}")
       ApiKey.new(response)
     end
 
@@ -64,7 +64,7 @@ module Sendly
     # @param key_id [String] API key ID
     # @return [Hash] Usage statistics
     def api_key_usage(key_id)
-      @client.get("/account/keys/#{key_id}/usage")
+      @client.get("/account/keys/#{URI.encode_www_form_component(key_id)}/usage")
     end
 
     # Create a new API key
@@ -96,7 +96,7 @@ module Sendly
       body = {}
       body[:reason] = reason if reason
 
-      @client.patch("/account/keys/#{key_id}/revoke", body)
+      @client.patch("/account/keys/#{URI.encode_www_form_component(key_id)}/revoke", body)
     end
 
     # Rotate an API key.
@@ -127,7 +127,7 @@ module Sendly
       body = {}
       body[:gracePeriodHours] = grace_period_hours unless grace_period_hours.nil?
 
-      @client.post("/account/keys/#{key_id}/rotate", body)
+      @client.post("/account/keys/#{URI.encode_www_form_component(key_id)}/rotate", body)
     end
 
     def transfer_credits(target_organization_id:, amount:)

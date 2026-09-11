@@ -114,7 +114,7 @@ module Sendly
       params[:limit] = limit if limit
       params[:offset] = offset if offset
 
-      response = @client.get("/contact-lists/#{id}", params)
+      response = @client.get("/contact-lists/#{URI.encode_www_form_component(id)}", params)
       ContactList.new(response)
     end
 
@@ -131,21 +131,21 @@ module Sendly
       body[:name] = name if name
       body[:description] = description unless description.nil?
 
-      response = @client.patch("/contact-lists/#{id}", body)
+      response = @client.patch("/contact-lists/#{URI.encode_www_form_component(id)}", body)
       ContactList.new(response)
     end
 
     def delete(id)
-      @client.delete("/contact-lists/#{id}")
+      @client.delete("/contact-lists/#{URI.encode_www_form_component(id)}")
     end
 
     def add_contacts(list_id, contact_ids)
-      response = @client.post("/contact-lists/#{list_id}/contacts", { contact_ids: contact_ids })
+      response = @client.post("/contact-lists/#{URI.encode_www_form_component(list_id)}/contacts", { contact_ids: contact_ids })
       { added_count: response["added_count"] || response["addedCount"] }
     end
 
     def remove_contact(list_id, contact_id)
-      @client.delete("/contact-lists/#{list_id}/contacts/#{contact_id}")
+      @client.delete("/contact-lists/#{URI.encode_www_form_component(list_id)}/contacts/#{URI.encode_www_form_component(contact_id)}")
     end
   end
 
@@ -175,7 +175,7 @@ module Sendly
     end
 
     def get(id)
-      response = @client.get("/contacts/#{id}")
+      response = @client.get("/contacts/#{URI.encode_www_form_component(id)}")
       Contact.new(response)
     end
 
@@ -195,12 +195,12 @@ module Sendly
       body[:email] = email unless email.nil?
       body[:metadata] = metadata unless metadata.nil?
 
-      response = @client.patch("/contacts/#{id}", body)
+      response = @client.patch("/contacts/#{URI.encode_www_form_component(id)}", body)
       Contact.new(response)
     end
 
     def delete(id)
-      @client.delete("/contacts/#{id}")
+      @client.delete("/contacts/#{URI.encode_www_form_component(id)}")
     end
 
     # Clear the invalid flag on a contact so future campaigns include it again.
@@ -208,7 +208,7 @@ module Sendly
     # error (landline, invalid number) or when a carrier lookup reports they
     # can't receive SMS.
     def mark_valid(id)
-      response = @client.post("/contacts/#{id}/mark-valid", {})
+      response = @client.post("/contacts/#{URI.encode_www_form_component(id)}/mark-valid", {})
       Contact.new(response)
     end
 

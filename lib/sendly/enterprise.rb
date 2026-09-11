@@ -22,13 +22,13 @@ module Sendly
     def get(workspace_id)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
 
-      @client.get("/enterprise/workspaces/#{workspace_id}")
+      @client.get("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}")
     end
 
     def delete(workspace_id)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
 
-      @client.delete("/enterprise/workspaces/#{workspace_id}")
+      @client.delete("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}")
     end
 
     # Submit (or resubmit) a verification for an enterprise workspace.
@@ -89,7 +89,7 @@ module Sendly
       body[:privacyUrl] = privacy_url unless privacy_url.nil?
       body[:termsUrl] = terms_url unless terms_url.nil?
 
-      @client.post("/enterprise/workspaces/#{workspace_id}/verification/submit", body)
+      @client.post("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/verification/submit", body)
     end
 
     # Convenience alias for resubmits. Identical to +submit_verification+
@@ -106,7 +106,7 @@ module Sendly
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
       raise ArgumentError, "Source workspace ID is required" if source_workspace_id.nil? || source_workspace_id.empty?
 
-      @client.post("/enterprise/workspaces/#{workspace_id}/verification/inherit", {
+      @client.post("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/verification/inherit", {
         source_workspace_id: source_workspace_id
       })
     end
@@ -114,7 +114,7 @@ module Sendly
     def get_verification(workspace_id)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
 
-      @client.get("/enterprise/workspaces/#{workspace_id}/verification")
+      @client.get("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/verification")
     end
 
     def transfer_credits(workspace_id, source_workspace_id:, amount:)
@@ -122,7 +122,7 @@ module Sendly
       raise ArgumentError, "Source workspace ID is required" if source_workspace_id.nil? || source_workspace_id.empty?
       raise ArgumentError, "Amount must be a positive number" if !amount.is_a?(Integer) || amount <= 0
 
-      @client.post("/enterprise/workspaces/#{workspace_id}/transfer-credits", {
+      @client.post("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/transfer-credits", {
         source_workspace_id: source_workspace_id,
         amount: amount
       })
@@ -131,7 +131,7 @@ module Sendly
     def get_credits(workspace_id)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
 
-      @client.get("/enterprise/workspaces/#{workspace_id}/credits")
+      @client.get("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/credits")
     end
 
     def create_key(workspace_id, name: nil, type: nil)
@@ -141,26 +141,26 @@ module Sendly
       body[:name] = name if name
       body[:type] = type if type
 
-      @client.post("/enterprise/workspaces/#{workspace_id}/keys", body)
+      @client.post("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/keys", body)
     end
 
     def list_keys(workspace_id)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
 
-      @client.get("/enterprise/workspaces/#{workspace_id}/keys")
+      @client.get("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/keys")
     end
 
     def revoke_key(workspace_id, key_id)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
       raise ArgumentError, "Key ID is required" if key_id.nil? || key_id.empty?
 
-      @client.delete("/enterprise/workspaces/#{workspace_id}/keys/#{key_id}")
+      @client.delete("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/keys/#{URI.encode_www_form_component(key_id)}")
     end
 
     def list_opt_in_pages(workspace_id)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
 
-      @client.get("/enterprise/workspaces/#{workspace_id}/opt-in-pages")
+      @client.get("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/opt-in-pages")
     end
 
     def create_opt_in_page(workspace_id, business_name:, use_case: nil, use_case_summary: nil, sample_messages: nil)
@@ -172,7 +172,7 @@ module Sendly
       body[:useCaseSummary] = use_case_summary if use_case_summary
       body[:sampleMessages] = sample_messages if sample_messages
 
-      @client.post("/enterprise/workspaces/#{workspace_id}/opt-in-pages", body)
+      @client.post("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/opt-in-pages", body)
     end
 
     def update_opt_in_page(workspace_id, page_id, logo_url: nil, header_color: nil, button_color: nil, custom_headline: nil, custom_benefits: nil)
@@ -186,14 +186,14 @@ module Sendly
       body[:customHeadline] = custom_headline unless custom_headline.nil?
       body[:customBenefits] = custom_benefits unless custom_benefits.nil?
 
-      @client.patch("/enterprise/workspaces/#{workspace_id}/opt-in-pages/#{page_id}", body)
+      @client.patch("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/opt-in-pages/#{URI.encode_www_form_component(page_id)}", body)
     end
 
     def delete_opt_in_page(workspace_id, page_id)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
       raise ArgumentError, "Page ID is required" if page_id.nil? || page_id.empty?
 
-      @client.delete("/enterprise/workspaces/#{workspace_id}/opt-in-pages/#{page_id}")
+      @client.delete("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/opt-in-pages/#{URI.encode_www_form_component(page_id)}")
     end
 
     def set_webhook(workspace_id, url:, events: nil, description: nil)
@@ -204,19 +204,19 @@ module Sendly
       body[:events] = events if events
       body[:description] = description if description
 
-      @client.put("/enterprise/workspaces/#{workspace_id}/webhooks", body)
+      @client.put("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/webhooks", body)
     end
 
     def list_webhooks(workspace_id)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
 
-      @client.get("/enterprise/workspaces/#{workspace_id}/webhooks")
+      @client.get("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/webhooks")
     end
 
     def delete_webhooks(workspace_id, webhook_id: nil)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
 
-      path = "/enterprise/workspaces/#{workspace_id}/webhooks"
+      path = "/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/webhooks"
       path += "?webhookId=#{webhook_id}" if webhook_id
 
       @client.delete(path)
@@ -225,7 +225,7 @@ module Sendly
     def test_webhook(workspace_id)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
 
-      @client.post("/enterprise/workspaces/#{workspace_id}/webhooks/test")
+      @client.post("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/webhooks/test")
     end
 
     def suspend(workspace_id, reason: nil)
@@ -234,13 +234,13 @@ module Sendly
       body = {}
       body[:reason] = reason if reason
 
-      @client.post("/enterprise/workspaces/#{workspace_id}/suspend", body)
+      @client.post("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/suspend", body)
     end
 
     def resume(workspace_id)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
 
-      @client.post("/enterprise/workspaces/#{workspace_id}/resume")
+      @client.post("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/resume")
     end
 
     def provision_bulk(workspaces)
@@ -255,7 +255,7 @@ module Sendly
       raise ArgumentError, "Page ID is required" if page_id.nil? || page_id.empty?
       raise ArgumentError, "Domain is required" if domain.nil? || domain.empty?
 
-      @client.put("/enterprise/workspaces/#{workspace_id}/pages/#{page_id}/domain", { domain: domain })
+      @client.put("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/pages/#{URI.encode_www_form_component(page_id)}/domain", { domain: domain })
     end
 
     def send_invitation(workspace_id, email:, role:)
@@ -263,7 +263,7 @@ module Sendly
       raise ArgumentError, "Email is required" if email.nil? || email.empty?
       raise ArgumentError, "Role is required" if role.nil? || role.empty?
 
-      @client.post("/enterprise/workspaces/#{workspace_id}/invitations", {
+      @client.post("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/invitations", {
         email: email,
         role: role
       })
@@ -272,26 +272,26 @@ module Sendly
     def list_invitations(workspace_id)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
 
-      @client.get("/enterprise/workspaces/#{workspace_id}/invitations")
+      @client.get("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/invitations")
     end
 
     def cancel_invitation(workspace_id, invite_id)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
       raise ArgumentError, "Invite ID is required" if invite_id.nil? || invite_id.empty?
 
-      @client.delete("/enterprise/workspaces/#{workspace_id}/invitations/#{invite_id}")
+      @client.delete("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/invitations/#{URI.encode_www_form_component(invite_id)}")
     end
 
     def get_quota(workspace_id)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
 
-      @client.get("/enterprise/workspaces/#{workspace_id}/quota")
+      @client.get("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/quota")
     end
 
     def set_quota(workspace_id, monthly_message_quota:)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
 
-      @client.put("/enterprise/workspaces/#{workspace_id}/quota", {
+      @client.put("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/quota", {
         monthlyMessageQuota: monthly_message_quota
       })
     end
