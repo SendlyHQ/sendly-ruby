@@ -99,6 +99,10 @@ module Sendly
     EVENT_CALL_STARTED                  = "call.started"
     EVENT_CALL_COMPLETED                = "call.completed"
     EVENT_CALL_RECORDING_READY          = "call.recording.ready"
+    EVENT_SHORT_CODE_ACTION_REQUIRED     = "short_code.action_required"
+    EVENT_SHORT_CODE_REJECTED            = "short_code.rejected"
+    EVENT_SHORT_CODE_FILED               = "short_code.filed"
+    EVENT_SHORT_CODE_LIVE                = "short_code.live"
 
     # Source of a list-health event. Frozen enum — new values will be
     # added in minor SDK versions, never removed.
