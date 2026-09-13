@@ -192,6 +192,13 @@ module Sendly
       @rcs ||= RcsResource.new(self)
     end
 
+    # Access the Calls resource (phone calls handled by your AI agents)
+    #
+    # @return [Sendly::CallsResource]
+    def calls
+      @calls ||= CallsResource.new(self)
+    end
+
     # Make a GET request
     #
     # @param path [String] API path

@@ -82,7 +82,12 @@ RSpec.describe Sendly::NumbersResource do
         'numbers' => [
           { 'id' => 'num_1', 'phoneNumber' => '+447400000001', 'status' => 'active',
             'source' => 'purchased', 'countryCode' => 'GB',
-            'phoneNumberType' => 'mobile', 'monthlyCostCents' => 300 }
+            'phoneNumberType' => 'mobile', 'monthlyCostCents' => 300,
+            'voiceEnabled' => false, 'voiceMode' => 'none' },
+          { 'id' => 'num_2', 'phoneNumber' => '+15555550188', 'status' => 'active',
+            'source' => 'purchased', 'countryCode' => 'US',
+            'phoneNumberType' => 'local', 'monthlyCostCents' => 300,
+            'voiceEnabled' => true, 'voiceMode' => 'ring_dashboard' }
         ]
       })
 
@@ -96,6 +101,28 @@ RSpec.describe Sendly::NumbersResource do
       expect(number.country_code).to eq('GB')
       expect(number.phone_number_type).to eq('mobile')
       expect(number.monthly_cost_cents).to eq(300)
+      expect(number.voice_enabled).to be(false)
+      expect(number.voice_enabled?).to be(false)
+      expect(number.voice_mode).to eq('none')
+
+      voice = result[:numbers].find(&:voice_enabled?)
+      expect(voice.phone_number).to eq('+15555550188')
+      expect(voice.voice_mode).to eq('ring_dashboard')
+      expect(Sendly::PhoneNumber::VOICE_MODES).to include(voice.voice_mode)
+      expect(voice.raw['voiceEnabled']).to be(true)
+      expect(voice.to_h).to include(voice_enabled: true, voice_mode: 'ring_dashboard')
+    end
+
+    it 'leaves voice fields nil when the API omits them' do
+      stub_request_with_auth(:get, '/numbers', response_body: {
+        'numbers' => [{ 'id' => 'num_1', 'phoneNumber' => '+447400000001', 'status' => 'active' }]
+      })
+
+      number = numbers.list[:numbers].first
+      expect(number.voice_enabled).to be_nil
+      expect(number.voice_enabled?).to be(false)
+      expect(number.voice_mode).to be_nil
+      expect(number.to_h).not_to have_key(:voice_enabled)
     end
   end
 

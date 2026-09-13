@@ -802,6 +802,7 @@ end
 # Get one number you own (includes is_default, which the list omits)
 number = client.numbers.get('num_abc123')
 puts "#{number.phone_number} — default sender: #{number.is_default}"
+puts "voice: #{number.voice_enabled?} (#{number.voice_mode})"
 
 # Update a number — make it the default sender (must be active),
 # and/or cancel a scheduled release ("keep this number")
@@ -1170,6 +1171,88 @@ client.messages.send(
   fallback_to_sms: false
 )
 ```
+
+## Voice Calls
+
+Place phone calls that one of your AI agents handles, list and inspect
+calls, end a call early, and download recordings. Agents are configured in
+the dashboard under Calls, then Agents; the number you call from must have
+voice switched on there (Calls, then Settings) and an emergency address
+registered before it can place outbound calls. Each `Sendly::PhoneNumber`
+from `client.numbers.list` carries `voice_enabled?` and `voice_mode`
+(`"none"`, `"ring_dashboard"` or `"agent"`) so you can pick a `from`:
+
+```ruby
+from = client.numbers.list[:numbers].find(&:voice_enabled?)&.phone_number
+```
+
+Calls are prepaid from your credit balance per started minute: 2 credits a
+minute outbound, plus 8 a minute while an AI agent is on the call (10 in
+total for an API-placed call). Unanswered calls cost nothing. Destinations
+are US and Canadian numbers. Reads need the `calls:read` scope; `create`
+and `hangup` need `calls:write` and a live key.
+
+> **Rolling out.** Voice is enabled workspace by workspace. Until it is on
+> for yours, every call method raises `Sendly::NotFoundError`
+> (`voice_not_enabled`).
+
+```ruby
+# Place a call. Returns at once with the call ringing; the agent greets the
+# callee when they answer and uses `context` for this call only.
+call = client.calls.create(
+  to: "+15555550123",
+  agent_id: "3c4d5e6f-7081-4293-a4b5-c6d7e8f90a1b",
+  from: "+15555550188",                # optional when you have one voice number
+  context: "Confirm the 3pm appointment on Tuesday.",
+  metadata: { "crmId" => "lead_8812" } # up to 20 string pairs, echoed everywhere
+)
+puts call.id
+puts call.status        # "ringing"
+puts call.handled_by    # "agent"
+
+# Follow it. Agent-handled calls include a transcript once fetched by id.
+call = client.calls.get(call.id)
+puts call.status        # "ringing" -> "active" -> "completed" (or no_answer, busy, ...)
+puts call.hangup_class  # why it ended, e.g. "agent_agent_hangup"
+puts call.credits_charged
+call.transcript&.each { |line| puts "#{line.speaker}: #{line.text}" }
+
+# List (newest first; limit 1-100, default 50)
+page = client.calls.list(status: "completed", direction: "outbound", agent_id: call.agent_id, limit: 20)
+page.each { |c| puts "#{c.to} #{c.duration_secs}s #{c.credits_charged} credits" }
+puts page.total
+puts page.has_more?
+
+# End a call. Ringing -> "cancelled", active -> "completed"; a call that
+# has already ended comes back unchanged.
+client.calls.hangup(call.id)
+
+# Recording. The URL is signed and valid for five minutes; it is nil until
+# the recording is ready. Ogg/Opus, dual channel on agent calls.
+rec = client.calls.recording(call.id)
+if rec.ready?
+  File.binwrite("#{call.id}.ogg", Net::HTTP.get(URI(rec.url)))
+end
+```
+
+Call errors map onto the usual classes: `Sendly::InsufficientCreditsError`
+when the balance cannot cover one minute at the agent rate;
+`Sendly::NotFoundError` for `voice_not_enabled`, `outbound_calls_not_enabled`,
+`agent_not_found`, `number_not_found` and `call_not_found`;
+`Sendly::ValidationError` for `invalid_number`, `destination_not_supported`,
+`agent_required`, `invalid_metadata` and `from_number_required`;
+`Sendly::RateLimitError` for `daily_call_limit`; `Sendly::APIError` with
+`status_code` 428 for `e911_required` (register an emergency address for the
+number), 409 for `agent_disabled`, `no_voice_number` and `lines_busy` (retry
+shortly), or 403 for `live_key_required` and a key missing the scope; and
+`Sendly::ServerError` (a sibling of `APIError`, not a subclass) for 503
+`voice_unavailable` / `agents_unavailable` and 500 `voice_internal_error`.
+The full list is `Sendly::Call::ERROR_CODES`; the hangup vocabulary is
+`Sendly::Call::HANGUP_CLASSES`.
+
+`call.started`, `call.completed` and `call.recording.ready` webhooks carry
+the same object in snake_case (`handled_by`, `hangup_class`, `billing`,
+`metadata`, ...); `Sendly::Call.new(event.raw_object)` reads it.
 
 ## Error Handling
 

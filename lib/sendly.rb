@@ -27,6 +27,7 @@ require_relative "sendly/tendlc_resource"
 require_relative "sendly/links_resource"
 require_relative "sendly/whatsapp_resource"
 require_relative "sendly/rcs_resource"
+require_relative "sendly/calls_resource"
 
 # Sendly Ruby SDK
 #

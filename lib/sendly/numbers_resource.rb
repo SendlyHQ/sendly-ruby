@@ -53,9 +53,21 @@ module Sendly
                 # true when the number is scheduled for release at period end.
                 :pending_cancellation,
                 # ISO-8601 timestamp string, or nil when no release is scheduled.
-                :scheduled_release_at
+                :scheduled_release_at,
+                # true when the number can place and receive phone calls
+                # (switched on in the dashboard under Calls, then Settings).
+                :voice_enabled,
+                # One of {VOICE_MODES}: "none" when voice is off, "ring_dashboard"
+                # when inbound calls ring the team, "agent" when an AI agent answers.
+                :voice_mode
+
+    # @return [Hash] The raw parsed response
+    attr_reader :raw
+
+    VOICE_MODES = %w[none ring_dashboard agent].freeze
 
     def initialize(data)
+      @raw = data
       @id = data["id"]
       @phone_number = data["phoneNumber"] || data["phone_number"]
       @status = data["status"]
@@ -67,6 +79,13 @@ module Sendly
       @requirements_submitted_at = data["requirementsSubmittedAt"] || data["requirements_submitted_at"]
       @pending_cancellation = data.key?("pendingCancellation") ? data["pendingCancellation"] : data["pending_cancellation"]
       @scheduled_release_at = data["scheduledReleaseAt"] || data["scheduled_release_at"]
+      @voice_enabled = data.key?("voiceEnabled") ? data["voiceEnabled"] : data["voice_enabled"]
+      @voice_mode = data["voiceMode"] || data["voice_mode"]
+    end
+
+    # @return [Boolean] Whether the number can be used as the +from+ of a call
+    def voice_enabled?
+      voice_enabled == true
     end
 
     def to_h
@@ -76,7 +95,8 @@ module Sendly
         monthly_cost_cents: monthly_cost_cents, is_default: is_default,
         requirements_submitted_at: requirements_submitted_at,
         pending_cancellation: pending_cancellation,
-        scheduled_release_at: scheduled_release_at
+        scheduled_release_at: scheduled_release_at,
+        voice_enabled: voice_enabled, voice_mode: voice_mode
       }.compact
     end
   end

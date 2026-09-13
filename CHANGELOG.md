@@ -1,5 +1,21 @@
 # sendly (Ruby)
 
+## Unreleased
+
+### Minor Changes
+
+- **Voice calls: `client.calls`.** Place phone calls handled by your AI agents, list and inspect them, end one early and fetch recordings, over the new `/api/v1/calls` routes. `create(to:, agent_id:, from: nil, context: nil, metadata: nil)` returns a `Sendly::Call` that is `ringing`; `list` takes `limit:`, `offset:`, `status:`, `direction:`, `kind:`, `agent_id:`, `to:` and `from:` and returns an Enumerable `Sendly::CallList` with `total`, `limit`, `offset` and `has_more?`; `get(id)` adds the `transcript` (an array of `Sendly::CallTranscriptLine`) on agent-handled calls and leaves it `nil` otherwise; `hangup(id)` cancels a ringing call or completes an active one and returns an already-ended call unchanged; `recording(id)` returns a `Sendly::CallRecording` whose signed `url` is set only while `ready?` and expires after five minutes. `create` and `hangup` send the client's usual `Idempotency-Key` and accept `idempotency_key:`. `Sendly::Call` also reads the snake_case object carried by the `call.started`, `call.completed` and `call.recording.ready` webhooks, including the new `billing` and `metadata` keys. Vocabularies are published as `Sendly::Call::STATUSES`, `::HANGUP_CLASSES` and `::ERROR_CODES`. `Sendly::PhoneNumber` gains `voice_enabled` (with `voice_enabled?`), `voice_mode` (`Sendly::PhoneNumber::VOICE_MODES`) and `raw`, so `client.numbers.list` can pick the `from` number for a call. Reads need the `calls:read` scope; writes need `calls:write` and a live key. Voice is enabled workspace by workspace: until it is on for yours the routes answer 404 `voice_not_enabled`, which raises `Sendly::NotFoundError`.
+
+  ```ruby
+  call = client.calls.create(
+    to: "+15555550123",
+    agent_id: "3c4d5e6f-7081-4293-a4b5-c6d7e8f90a1b",
+    context: "Confirm the 3pm appointment on Tuesday."
+  )
+  call = client.calls.get(call.id)
+  call.transcript&.each { |line| puts "#{line.speaker}: #{line.text}" }
+  ```
+
 ## 4.0.0
 
 **Upgrading from 3.40.0:** that release already contained the breaking changes below, published by mistake as a minor version. 4.0.0 carries them under the correct major. Relative to 3.40.0, the only new changes are under **Security**.
