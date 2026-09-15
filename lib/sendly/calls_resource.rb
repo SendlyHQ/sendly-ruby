@@ -58,6 +58,8 @@ module Sendly
       no_voice_number number_not_found destination_not_supported e911_required lines_busy
       daily_call_limit call_not_found live_key_required voice_internal_error
       insufficient_credits invalid_number rate_limit_exceeded forbidden
+      invalid_request insufficient_permissions agent_in_use agent_limit invalid_voice_mode
+      invalid_address e911_not_applicable voice_attach_failed carrier_refused
     ].freeze
 
     attr_reader :id, :object, :kind, :direction, :status, :handled_by, :agent_id,
@@ -182,8 +184,8 @@ module Sendly
   # call runs, "ready" once it can be fetched, or "failed". +url+ and
   # +expires_at+ are set only when {#ready?}: the URL is signed and valid for
   # five minutes. Recordings are Ogg/Opus (+content_type+ "audio/ogg");
-  # agent-handled calls are recorded dual-channel, caller left and agent
-  # right.
+  # agent-handled calls are recorded dual-channel, with the agent on the
+  # left channel and the other party on the right.
   class CallRecording
     STATUSES = %w[none recording ready failed].freeze
 
@@ -213,9 +215,10 @@ module Sendly
   # Calls resource: place phone calls handled by your AI agents, list and
   # inspect calls, end a call and fetch recordings.
   #
-  # A call placed over the API is answered by one of the AI agents you
-  # configure in the dashboard under Calls, then Agents; the +from+ number
-  # must have voice switched on in the dashboard. Calls are charged per
+  # A call placed over the API is answered by one of your AI agents
+  # (create them with {VoiceAgentsResource#create} or in the dashboard
+  # under Calls, then Agents); the +from+ number must have voice switched
+  # on ({VoiceNumbersResource#update} or the dashboard). Calls are charged per
   # started minute from your credit balance: 2 credits a minute outbound,
   # plus 8 a minute while an agent is on the call. Destinations are US and
   # Canadian numbers. Reads need the +calls:read+ scope, writes
@@ -278,7 +281,8 @@ module Sendly
     # @raise [Sendly::InsufficientCreditsError] HTTP 402 when the balance
     #   cannot cover one minute at the agent rate
     # @raise [Sendly::APIError] HTTP 428 +e911_required+ (register an
-    #   emergency address for the number first), 409 +agent_disabled+ /
+    #   emergency address for the number first with
+    #   {VoiceNumbersResource#register_emergency_address}), 409 +agent_disabled+ /
     #   +no_voice_number+ / +lines_busy+, 403 +live_key_required+
     # @raise [Sendly::RateLimitError] HTTP 429 +daily_call_limit+ / +rate_limit_exceeded+
     # @raise [Sendly::ServerError] HTTP 503 +voice_unavailable+ /

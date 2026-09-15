@@ -455,6 +455,18 @@ RSpec.describe 'Sendly Error Classes' do
           expect(error.code).to eq('CUSTOM_CODE')
         end
 
+        it 'keeps the parsed response body on every error it builds' do
+          body = { 'error' => 'agent_in_use', 'message' => 'This agent answers 1 number.',
+                   'numbers' => ['+15555550188'] }
+          error = Sendly::ErrorFactory.from_response(409, body)
+          expect(error).to be_a(Sendly::APIError)
+          expect(error.response_body).to eq(body)
+          expect(Sendly::ErrorFactory.from_response(422, { 'suggested' => nil }).response_body)
+            .to eq('suggested' => nil)
+          expect(Sendly::ErrorFactory.from_response(404, {}).response_body).to eq({})
+          expect(Sendly::APIError.new('raised locally').response_body).to be_nil
+        end
+
         it 'includes details from response' do
           body = { 'message' => 'Error', 'details' => { 'info' => 'Additional info' } }
           error = Sendly::ErrorFactory.from_response(418, body)

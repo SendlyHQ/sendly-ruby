@@ -199,6 +199,17 @@ module Sendly
       @calls ||= CallsResource.new(self)
     end
 
+    # Access the Voice resource (numbers, AI agents and voices for phone calls)
+    #
+    # @return [Sendly::VoiceResource]
+    #
+    # @example
+    #   agent = client.voice.agents.create(name: "Front desk")
+    #   client.voice.numbers.update("+15555550188", voice_enabled: true, voice_mode: "agent", agent_id: agent.id)
+    def voice
+      @voice ||= VoiceResource.new(self)
+    end
+
     # Make a GET request
     #
     # @param path [String] API path
@@ -255,10 +266,14 @@ module Sendly
 
     # Make a DELETE request
     #
+    # No Idempotency-Key is generated for a DELETE; pass +idempotency_key+
+    # to send one (1-255 printable ASCII characters).
+    #
     # @param path [String] API path
+    # @param idempotency_key [String, nil] Caller-supplied idempotency key (optional)
     # @return [Hash] Response body
-    def delete(path)
-      request(:delete, path)
+    def delete(path, idempotency_key: nil)
+      request(:delete, path, idempotency_key: idempotency_key)
     end
 
     # Make a GET request against the API origin, bypassing the +/api/v1+ base.

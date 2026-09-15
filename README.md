@@ -1175,10 +1175,12 @@ client.messages.send(
 ## Voice Calls
 
 Place phone calls that one of your AI agents handles, list and inspect
-calls, end a call early, and download recordings. Agents are configured in
-the dashboard under Calls, then Agents; the number you call from must have
-voice switched on there (Calls, then Settings) and an emergency address
-registered before it can place outbound calls. Each `Sendly::PhoneNumber`
+calls, end a call early, and download recordings. Agents are created with
+`client.voice.agents` or in the dashboard under Calls, then Agents; the
+number you call from must have voice switched on and an emergency address
+registered before it can place outbound calls (see
+[Configure voice](#configure-voice), or Calls, then Settings in the
+dashboard). Each `Sendly::PhoneNumber`
 from `client.numbers.list` carries `voice_enabled?` and `voice_mode`
 (`"none"`, `"ring_dashboard"` or `"agent"`) so you can pick a `from`:
 
@@ -1193,8 +1195,8 @@ are US and Canadian numbers. Reads need the `calls:read` scope; `create`
 and `hangup` need `calls:write` and a live key.
 
 > **Rolling out.** Voice is enabled workspace by workspace. Until it is on
-> for yours, every call method raises `Sendly::NotFoundError`
-> (`voice_not_enabled`).
+> for yours, every `client.calls` and `client.voice` method raises
+> `Sendly::NotFoundError` (`voice_not_enabled`).
 
 ```ruby
 # Place a call. Returns at once with the call ringing; the agent greets the
@@ -1228,7 +1230,8 @@ puts page.has_more?
 client.calls.hangup(call.id)
 
 # Recording. The URL is signed and valid for five minutes; it is nil until
-# the recording is ready. Ogg/Opus, dual channel on agent calls.
+# the recording is ready. Ogg/Opus; agent calls are dual channel, with the
+# agent on the left channel and the other party on the right.
 rec = client.calls.recording(call.id)
 if rec.ready?
   File.binwrite("#{call.id}.ogg", Net::HTTP.get(URI(rec.url)))
@@ -1253,6 +1256,88 @@ The full list is `Sendly::Call::ERROR_CODES`; the hangup vocabulary is
 `call.started`, `call.completed` and `call.recording.ready` webhooks carry
 the same object in snake_case (`handled_by`, `hangup_class`, `billing`,
 `metadata`, ...); `Sendly::Call.new(event.raw_object)` reads it.
+
+### Configure voice
+
+Everything a call depends on is configurable from code with `client.voice`:
+switch voice on for a number and choose how it answers, register the
+number's emergency address, and create the AI agents that talk. Reads need
+the `calls:read` scope; writes need `calls:write` and a live key. In a team
+workspace, changing a number or its emergency address also needs a role that
+can change settings, and managing agents a role that can manage API keys
+(each agent holds its own scoped sending key).
+
+```ruby
+# Numbers. Pass the number's id or its E.164 phone number.
+client.voice.numbers.list.each do |n|
+  puts "#{n.phone_number} #{n.voice_mode} #{n.emergency_address&.status || 'no emergency address'}"
+end
+number = client.voice.numbers.get("+15555550188")
+puts number.rate_per_minute.agent   # credits a minute when an agent answers
+
+# A US or Canadian number needs an emergency address before it can place
+# calls. The first registration adds $1.50 a month to the number;
+# registering again replaces the address without a second charge.
+number = client.voice.numbers.register_emergency_address(
+  "+15555550188",
+  street: "500 Example Ave",
+  unit: "Suite 2",
+  city: "Austin",
+  state: "TX",
+  zip: "78701"                      # country: defaults to "US"
+)
+puts number.emergency_address.status
+
+# Voices and agents. An agent answers real callers on any number pointed at it.
+client.voice.voices.list.each { |v| puts "#{v.id}: #{v.label}" }
+
+agent = client.voice.agents.create(
+  name: "Front desk",
+  voice: "ashley",
+  greeting: "Thanks for calling Acme, how can I help?",
+  instructions: "Answer questions about opening hours and take a message for anything else.",
+  tools: { send_sms: true }         # snake_case or camelCase keys
+)
+puts agent.can_send_sms?            # true once it holds its scoped sending key
+client.voice.agents.update(agent.id, greeting: "Thanks for calling Acme. How can I help today?")
+client.voice.agents.list.each { |a| puts "#{a.name}: #{a.calls_handled} calls" }
+
+# Switching voice on changes how real calls to the number are answered.
+client.voice.numbers.update("+15555550188", voice_enabled: true, voice_mode: "agent", agent_id: agent.id)
+client.voice.numbers.update("+15555550188", voice_mode: "ring_dashboard") # ring the team instead
+client.voice.numbers.update("+15555550188", voice_enabled: false)         # switch voice off
+
+# An agent that answers a number can't be deleted until the number is moved.
+begin
+  client.voice.agents.delete(agent.id)
+rescue Sendly::APIError => e
+  raise unless e.response_body&.dig("error") == "agent_in_use"
+
+  puts "Still answers #{e.response_body['numbers'].join(', ')}"
+end
+```
+
+A mode alone is enough: `voice_mode: "agent"` or `"ring_dashboard"` switches
+voice on, so it can fail the way switching on does, and `voice_mode: "none"`
+switches it off. `voice_enabled: false` wins over any mode, and
+`voice_enabled: true` with `"none"` answers in `"ring_dashboard"` mode.
+
+Configuration errors map the same way: `Sendly::NotFoundError` for
+`number_not_found` and `agent_not_found`; `Sendly::ValidationError` for
+`invalid_request` (for example an emergency address field that is not a
+string), `invalid_voice_mode`, `agent_required`,
+`e911_not_applicable` and `invalid_address` (a 422 `invalid_address` means
+the address could not be validated, and `e.response_body["suggested"]` holds
+a corrected address when one was found); `Sendly::APIError` with
+`status_code` 409 for `agent_disabled`, `agent_limit` (20 agents per
+workspace) and `agent_in_use`; and `Sendly::ServerError` for 502
+`voice_attach_failed` and `carrier_refused` and 503 `voice_unavailable`,
+raised after the client has already retried the 5xx on its own. Not every
+`carrier_refused` is worth retrying: when the message says the number
+couldn't be found for emergency registration, retrying won't help, so
+contact support. When it says the address couldn't be registered or
+emergency calling couldn't be switched on, try again later. Every API error
+keeps the parsed body on `e.response_body`.
 
 ## Error Handling
 

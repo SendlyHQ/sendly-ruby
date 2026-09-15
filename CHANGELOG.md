@@ -1,5 +1,23 @@
 # sendly (Ruby)
 
+## 4.2.0
+
+### Minor Changes
+
+- **Voice configuration: `client.voice`.** Everything a phone call depends on is now configurable from code over the new `/api/v1/voice` routes. `client.voice.numbers` has `list`, `get(number)`, `update(number, voice_enabled:, voice_mode:, agent_id:)` and `register_emergency_address(number, street:, city:, state:, zip:, unit: nil, country: nil)`: switch voice on for a number, choose how it answers (`Sendly::VoiceNumber::VOICE_MODES`), and register the emergency address a US or Canadian number needs before it can place calls ($1.50 a month; registering again replaces the address without a second charge). `number` is the number's id or its E.164 phone number, and `agent_id: nil` clears the stored agent. `client.voice.agents` has `list`, `create(name:, ...)`, `get(id)`, `update(id, ...)` and `delete(id)` for the AI agents that answer and place calls (up to 20 per workspace, each holding its own scoped sending key); `tools:` takes `send_sms` and `transfer_to` in snake_case or camelCase. `client.voice.voices.list` lists the voices agents can speak with. Lists are Enumerable (`Sendly::VoiceNumberList`, `Sendly::VoiceAgentList`, `Sendly::VoiceList`); the models are `Sendly::VoiceNumber` (with `Sendly::VoiceNumberEmergencyAddress`, `Sendly::EmergencyAddress` and `Sendly::VoiceNumberRates`), `Sendly::VoiceAgent` (with `Sendly::VoiceAgentTools`), `Sendly::Voice` and `Sendly::DeletedVoiceAgent`. POSTs send the client's usual `Idempotency-Key`, and every write accepts `idempotency_key:`. Reads need the `calls:read` scope, writes `calls:write` and a live key; in a team workspace, number changes also need a role that can change settings and agent changes a role that can manage API keys. Deleting an agent that still answers a number raises `Sendly::APIError` (409 `agent_in_use`). `Sendly::Call::ERROR_CODES` gains `agent_in_use`, `agent_limit`, `invalid_voice_mode`, `invalid_address`, `e911_not_applicable`, `voice_attach_failed`, `carrier_refused`, `invalid_request` and `insufficient_permissions`.
+
+  ```ruby
+  agent = client.voice.agents.create(name: "Front desk", tools: { send_sms: true })
+  client.voice.numbers.update("+15555550188", voice_enabled: true, voice_mode: "agent", agent_id: agent.id)
+  ```
+
+- **`Sendly::Error#response_body`** is the parsed JSON body of the API error response, for refusals that carry more than a message: a 409 `agent_in_use` lists the numbers the agent still answers under `"numbers"`, and a 422 `invalid_address` carries a corrected address (or `nil`) under `"suggested"`. It is `nil` for errors raised before a request is sent.
+- **`Sendly::Client#delete` accepts `idempotency_key:`**, like `patch` and `put`.
+
+### Patch Changes
+
+- **The `Sendly::CallRecording` docstring had the channels the wrong way round.** Agent-handled calls are recorded with the agent on the left channel and the other party on the right.
+
 ## 4.1.0
 
 ### Minor Changes

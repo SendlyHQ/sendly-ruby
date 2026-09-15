@@ -12,11 +12,29 @@ module Sendly
     # @return [Integer, nil] HTTP status code
     attr_reader :status_code
 
+    # @return [Hash, nil] The parsed JSON body of the API's error response,
+    #   or +nil+ for errors raised before a request was sent. The API's own
+    #   error code is under +"error"+, and some refusals carry more than a
+    #   message: a 409 +agent_in_use+ lists the numbers the agent still
+    #   answers under +"numbers"+, and a 422 +invalid_address+ carries a
+    #   corrected address (or +nil+) under +"suggested"+.
+    attr_reader :response_body
+
     def initialize(message = nil, code: nil, details: nil, status_code: nil)
       @code = code
       @details = details
       @status_code = status_code
       super(message)
+    end
+
+    # Attach the parsed body of the API response this error came from.
+    #
+    # @api private
+    # @param body [Hash, nil]
+    # @return [self]
+    def with_response_body(body)
+      @response_body = body
+      self
     end
   end
 
@@ -101,23 +119,24 @@ module Sendly
       code = body["code"]
       details = body["details"]
 
-      case status
-      when 400, 422
-        ValidationError.new(message, details: details, field_errors: body["errors"])
-      when 401
-        AuthenticationError.new(message)
-      when 402
-        InsufficientCreditsError.new(message)
-      when 404
-        NotFoundError.new(message)
-      when 429
-        retry_after = body["retry_after"] || body["retryAfter"]
-        RateLimitError.new(message, retry_after: retry_after)
-      when 500..599
-        ServerError.new(message, status_code: status)
-      else
-        APIError.new(message, status_code: status, code: code, details: details)
-      end
+      error = case status
+              when 400, 422
+                ValidationError.new(message, details: details, field_errors: body["errors"])
+              when 401
+                AuthenticationError.new(message)
+              when 402
+                InsufficientCreditsError.new(message)
+              when 404
+                NotFoundError.new(message)
+              when 429
+                retry_after = body["retry_after"] || body["retryAfter"]
+                RateLimitError.new(message, retry_after: retry_after)
+              when 500..599
+                ServerError.new(message, status_code: status)
+              else
+                APIError.new(message, status_code: status, code: code, details: details)
+              end
+      error.with_response_body(body)
     end
   end
 end

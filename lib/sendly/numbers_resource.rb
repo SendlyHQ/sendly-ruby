@@ -55,7 +55,8 @@ module Sendly
                 # ISO-8601 timestamp string, or nil when no release is scheduled.
                 :scheduled_release_at,
                 # true when the number can place and receive phone calls
-                # (switched on in the dashboard under Calls, then Settings).
+                # (switched on with {VoiceNumbersResource#update} or in the
+                # dashboard under Calls, then Settings).
                 :voice_enabled,
                 # One of {VOICE_MODES}: "none" when voice is off, "ring_dashboard"
                 # when inbound calls ring the team, "agent" when an AI agent answers.
