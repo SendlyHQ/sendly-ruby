@@ -222,10 +222,6 @@ module Sendly
     end
 
     # Copy an existing template into a new draft.
-    #
-    # @note Not available yet: the versioned API serves no clone route, so
-    #   this call fails with a 404. To copy a template today, read it with
-    #   {#get} and pass its {Template#text} to {#create}.
     def clone(id, name: nil)
       body = {}
       body[:name] = name if name
