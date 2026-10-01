@@ -92,6 +92,18 @@ RSpec.describe Sendly::WhatsAppResource do
         expect { whatsapp.signup.create(phone_number: '') }
           .to raise_error(Sendly::ValidationError, /phone_number is required/)
       end
+
+      it 'raises ValidationError when business_account_id is empty' do
+        expect {
+          whatsapp.signup.create(phone_number: '+15559876543', business_account_id: '')
+        }.to raise_error(Sendly::ValidationError, /business_account_id must be a non-empty string/)
+      end
+
+      it 'raises ValidationError when business_account_id is whitespace-only' do
+        expect {
+          whatsapp.signup.create(phone_number: '+15559876543', business_account_id: '   ')
+        }.to raise_error(Sendly::ValidationError, /business_account_id must be a non-empty string/)
+      end
     end
 
     describe '#get' do

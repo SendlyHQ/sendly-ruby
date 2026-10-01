@@ -69,17 +69,29 @@ module Sendly
 
     # Create a new API key
     #
+    # A live key needs a verified business and a credit balance; the API
+    # answers 403 +verification_required+ or 402 +credits_required+ otherwise.
+    #
     # @param name [String] Display name for the API key
+    # @param type [String] "test" (the default) or "live"
+    # @param scopes [Array<String>, nil] Scopes for the new key, e.g. ["sms:send"].
+    #   Omit to give it every scope the calling key has; a key cannot grant a
+    #   scope it does not have.
     # @param expires_at [String, nil] Optional expiration date (ISO 8601)
-    # @return [Hash] Contains 'apiKey' (metadata) and 'key' (full secret - only shown once!)
+    # @return [Hash] +{ "id", "name", "key", "keyPrefix", "type", "createdAt",
+    #   "expiresAt", "apiKey" }+, where "key" is the full secret (shown only
+    #   once) and "apiKey" is the key's metadata
+    # @raise [ArgumentError] If +name+ is missing or +type+ is not "test" or "live"
     #
     # @example
-    #   result = client.account.create_api_key("Production")
+    #   result = client.account.create_api_key("Production", type: "live", scopes: ["sms:send"])
     #   puts "Save this key: #{result['key']}"  # Only shown once!
-    def create_api_key(name, expires_at: nil)
+    def create_api_key(name, type: "test", scopes: nil, expires_at: nil)
       raise ArgumentError, "API key name is required" if name.nil? || name.empty?
+      raise ArgumentError, "API key type must be \"test\" or \"live\"" unless %w[test live].include?(type.to_s)
 
-      body = { name: name }
+      body = { name: name, type: type.to_s }
+      body[:scopes] = scopes unless scopes.nil?
       body[:expiresAt] = expires_at if expires_at
 
       @client.post("/account/keys", body)

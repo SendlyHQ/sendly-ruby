@@ -54,6 +54,34 @@ RSpec.describe 'Calls' do
     expect(Sendly::CallRecording::STATUSES).to eq(%w[none recording ready failed])
   end
 
+  describe 'channel' do
+    it 'publishes the channel vocabulary' do
+      expect(Sendly::Call::CHANNELS).to eq(%w[phone whatsapp browser])
+    end
+
+    it 'reads the channel a call was placed on' do
+      stub_request_with_auth(:get, "/calls/#{call_id}", response_body: call_body.merge('channel' => 'whatsapp'))
+
+      call = calls.get(call_id)
+
+      expect(call.channel).to eq('whatsapp')
+      expect(call.to_h[:channel]).to eq('whatsapp')
+    end
+
+    it 'passes an unknown channel through unchanged' do
+      call = Sendly::Call.new(call_body.merge('channel' => 'sip_trunk'))
+
+      expect(call.channel).to eq('sip_trunk')
+    end
+
+    it 'leaves channel nil when the API does not send it' do
+      call = Sendly::Call.new(call_body)
+
+      expect(call.channel).to be_nil
+      expect(call.to_h).not_to have_key(:channel)
+    end
+  end
+
   describe 'create' do
     it 'POSTs /calls with agentId, from, context and metadata and maps the 201' do
       stub = stub_request(:post, "#{base_url}/calls")
@@ -177,6 +205,17 @@ RSpec.describe 'Calls' do
 
       expect { calls.create(to: '+15555550123', agent_id: agent_id) }
         .to raise_error(Sendly::ValidationError, /Pass agentId/)
+    end
+
+    it 'lists from_number_not_supported, the 400 a number outside the US or Canada gets' do
+      stub_request(:post, "#{base_url}/calls")
+        .to_return(json(400, 'error' => 'from_number_not_supported',
+                             'message' => 'Calls can only be placed from numbers in the US or Canada right now.'))
+
+      expect { calls.create(to: '+15555550123', agent_id: agent_id, from: '+447700900123') }
+        .to raise_error(Sendly::ValidationError) { |e|
+          expect(Sendly::Call::ERROR_CODES).to include(e.response_body['error'])
+        }
     end
 
     it 'raises NotFoundError while voice is not enabled for the workspace' do

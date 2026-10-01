@@ -30,11 +30,23 @@ module Sendly
       ConversationWithMessages.new(response)
     end
 
-    def reply(id, text:, media_urls: nil, metadata: nil)
+    # Reply in a conversation. Send +text+, +media_urls+, or both.
+    #
+    # @param id [String] Conversation ID
+    # @param text [String, nil] Message text
+    # @param media_urls [Array<String>, nil] Media to attach (sent as MMS)
+    # @param metadata [Hash, nil] Custom metadata
+    # @return [Sendly::Message] The sent message
+    # @raise [Sendly::ValidationError] If +id+ is missing, or there is neither text nor media
+    def reply(id, text: nil, media_urls: nil, metadata: nil)
       raise ValidationError, "Conversation ID is required" if id.nil? || id.empty?
-      raise ValidationError, "Message text is required" if text.nil? || text.empty?
 
-      body = { text: text }
+      has_text = !(text.nil? || text.empty?)
+      has_media = media_urls.is_a?(Array) && !media_urls.empty?
+      raise ValidationError, "Provide 'text' or 'media_urls'" unless has_text || has_media
+
+      body = {}
+      body[:text] = text if has_text
       body[:mediaUrls] = media_urls if media_urls
       body[:metadata] = metadata if metadata
 
@@ -123,9 +135,9 @@ module Sendly
         page = list(limit: batch_size, offset: offset, status: status)
         page.each(&block)
 
-        break unless page.has_more
+        break if !page.has_more || page.count.zero?
 
-        offset += batch_size
+        offset += page.count
       end
     end
   end

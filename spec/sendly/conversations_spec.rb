@@ -74,4 +74,73 @@ RSpec.describe Sendly::ConversationsResource do
         .to raise_error(Sendly::ValidationError, /Conversation ID is required/)
     end
   end
+
+  describe '#each' do
+    def conversation_page(from, count, total:, offset:)
+      {
+        'data' => (from...(from + count)).map { |i| { 'id' => "conv_#{i}", 'phoneNumber' => '+15551234567', 'status' => 'active' } },
+        'pagination' => { 'total' => total, 'limit' => 100, 'offset' => offset, 'hasMore' => offset + count < total }
+      }
+    end
+
+    it 'advances by the rows returned when batch_size is over the API limit of 100' do
+      first = stub_request_with_auth(:get, '/conversations?limit=100&offset=0',
+                                     response_body: conversation_page(0, 100, total: 150, offset: 0))
+      second = stub_request_with_auth(:get, '/conversations?limit=100&offset=100',
+                                      response_body: conversation_page(100, 50, total: 150, offset: 100))
+
+      ids = conversations.each(batch_size: 200).map(&:id)
+
+      expect(ids.length).to eq(150)
+      expect(ids.uniq.length).to eq(150)
+      expect(first).to have_been_requested.once
+      expect(second).to have_been_requested.once
+      expect(a_request(:get, "#{base_url}/conversations?limit=100&offset=200")).not_to have_been_made
+    end
+
+    it 'stops at an empty page even when the API says there are more' do
+      stub = stub_request_with_auth(:get, '/conversations?limit=100&offset=0',
+                                    response_body: conversation_page(0, 0, total: 5, offset: 0))
+             .then.to_return(status: 200, body: conversation_page(0, 1, total: 1, offset: 0).to_json)
+
+      ids = conversations.each.map(&:id)
+
+      expect(ids).to be_empty
+      expect(stub).to have_been_requested.once
+    end
+  end
+
+  describe '#reply' do
+    def sent_message(overrides = {})
+      message_response('id' => 'msg_reply', 'direction' => 'outbound').merge(overrides)
+    end
+
+    it 'sends a media-only reply' do
+      stub = stub_request(:post, "#{base_url}/conversations/conv_1/messages")
+             .with(body: { mediaUrls: ['https://cdn.example.com/x.jpg'] }.to_json)
+             .to_return(status: 200, body: sent_message('mediaUrls' => ['https://cdn.example.com/x.jpg']).to_json,
+                        headers: { 'Content-Type' => 'application/json' })
+
+      message = conversations.reply('conv_1', media_urls: ['https://cdn.example.com/x.jpg'])
+
+      expect(stub).to have_been_requested
+      expect(message).to be_a(Sendly::Message)
+      expect(message.id).to eq('msg_reply')
+    end
+
+    it 'still sends a text reply as before' do
+      stub = stub_request(:post, "#{base_url}/conversations/conv_1/messages")
+             .with(body: { text: 'Thanks!' }.to_json)
+             .to_return(status: 200, body: sent_message.to_json, headers: { 'Content-Type' => 'application/json' })
+
+      conversations.reply('conv_1', text: 'Thanks!')
+
+      expect(stub).to have_been_requested
+    end
+
+    it 'raises ValidationError when there is neither text nor media' do
+      expect { conversations.reply('conv_1') }.to raise_error(Sendly::ValidationError)
+      expect { conversations.reply('conv_1', text: '', media_urls: []) }.to raise_error(Sendly::ValidationError)
+    end
+  end
 end

@@ -363,7 +363,8 @@ module Sendly
 
       if file_bytes
         body_parts << "--#{boundary}\r\n"
-        body_parts << "Content-Disposition: form-data; name=\"einDoc\"; filename=\"#{filename}\"\r\n"
+        safe_name = filename.to_s.gsub('"', "%22").gsub("\r", "%0D").gsub("\n", "%0A")
+        body_parts << "Content-Disposition: form-data; name=\"einDoc\"; filename=\"#{safe_name}\"\r\n"
         body_parts << "Content-Type: #{content_type}\r\n\r\n"
         body_parts << file_bytes
         body_parts << "\r\n"
@@ -385,7 +386,7 @@ module Sendly
       req["X-Organization-Id"] = @client.organization_id if @client.organization_id
       # Single-use auto key (this path has no retry loop).
       req["Idempotency-Key"] = @client.generate_idempotency_key
-      req.body = body_parts.join
+      req.body = body_parts.map { |part| part.to_s.b }.join
 
       begin
         response = http.request(req)

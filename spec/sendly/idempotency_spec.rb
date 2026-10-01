@@ -106,7 +106,7 @@ RSpec.describe 'Idempotency keys' do
       expect(keys[0]).to eq(keys[1])
     end
 
-    it 'rotates the auto-generated key when retrying after a 5xx response' do
+    it 'keeps the auto-generated key when retrying after a 5xx response, which the API never records' do
       keys = capture_keys(:post, '/messages', server_error, ok(message_response))
 
       message = messages.send(to: '+15551234567', text: 'Hello!')
@@ -114,11 +114,10 @@ RSpec.describe 'Idempotency keys' do
       expect(message.id).to eq('msg_abc123')
       expect(keys.length).to eq(2)
       expect(keys[0]).to match(auto_key_pattern)
-      expect(keys[1]).to match(auto_key_pattern)
-      expect(keys[0]).not_to eq(keys[1])
+      expect(keys[1]).to eq(keys[0])
     end
 
-    it 'rotates the auto key on 5xx for media uploads too' do
+    it 'keeps the auto key on 5xx for media uploads too' do
       keys = capture_keys(:post, '/media',
                           server_error(502),
                           ok('id' => 'med_x', 'url' => 'https://cdn.example/x.jpg'))
@@ -127,8 +126,7 @@ RSpec.describe 'Idempotency keys' do
 
       expect(keys.length).to eq(2)
       expect(keys[0]).to match(auto_key_pattern)
-      expect(keys[1]).to match(auto_key_pattern)
-      expect(keys[0]).not_to eq(keys[1])
+      expect(keys[1]).to eq(keys[0])
     end
   end
 

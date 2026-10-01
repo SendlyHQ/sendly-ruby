@@ -16,6 +16,8 @@ module Sendly
     # @param mode [String, nil] Event mode filter: "all", "test", or "live" (live requires verification)
     # @param metadata [Hash, nil] Custom metadata
     # @return [Sendly::WebhookCreatedResponse]
+    # @raise [ArgumentError] If +url+ is not an https:// URL or +events+ is
+    #   empty; no request is sent
     #
     # @example
     #   webhook = client.webhooks.create(
@@ -65,6 +67,8 @@ module Sendly
     # @param mode [String, nil] Event mode filter: "all", "test", or "live"
     # @param metadata [Hash, nil] Custom metadata
     # @return [Sendly::Webhook]
+    # @raise [ArgumentError] If +webhook_id+ does not start with +whk_+ or
+    #   +url+ is not an https:// URL; no request is sent
     def update(webhook_id, url: nil, events: nil, description: nil, is_active: nil, mode: nil, metadata: nil)
       validate_webhook_id!(webhook_id)
       raise ArgumentError, "Webhook URL must be HTTPS" if url && !url.start_with?("https://")
@@ -94,7 +98,9 @@ module Sendly
     # Test a webhook endpoint
     #
     # @param webhook_id [String] Webhook ID
-    # @return [Sendly::WebhookTestResult]
+    # @return [Sendly::WebhookTestResult] The delivered test, with its status code and timing
+    # @raise [Sendly::ValidationError] If the test delivery fails; the message
+    #   is the API's, e.g. "Test webhook failed: ..."
     def test(webhook_id)
       validate_webhook_id!(webhook_id)
       response = @client.post("/webhooks/#{URI.encode_www_form_component(webhook_id)}/test")
@@ -139,8 +145,10 @@ module Sendly
     # Backfill missed webhook events from the underlying message log.
     #
     # Use when a circuit-breaker outage left events with no audit row (the
-    # case {#redeliver} cannot recover). Synthesized events have fresh IDs;
-    # clients should dedupe by event.data.object.id (the message ID).
+    # case {#redeliver} cannot recover). Synthesized message events carry the
+    # same event id the original dispatch used, so dedupe on event.id. Do not
+    # dedupe on event.data.object.id: a message's sent and delivered events
+    # share it.
     # Rejects with HTTP 409 if the circuit is currently open — call
     # {#reset_circuit} first.
     #
@@ -162,6 +170,11 @@ module Sendly
 
     # Rotate the webhook signing secret
     #
+    # Deliveries are signed with the new secret as soon as this returns, and
+    # the old secret is not kept, so have your endpoint accept both secrets
+    # while you deploy the new one. The new secret is shown only once, on
+    # {Sendly::WebhookSecretRotation#new_secret}.
+    #
     # @param webhook_id [String] Webhook ID
     # @return [Sendly::WebhookSecretRotation]
     def rotate_secret(webhook_id)
@@ -170,14 +183,24 @@ module Sendly
       WebhookSecretRotation.new(response)
     end
 
-    # Get delivery history for a webhook
+    # Get delivery history for a webhook, newest first
     #
     # @param webhook_id [String] Webhook ID
+    # @param limit [Integer, nil] Maximum deliveries to return (the API defaults to 50, max 100)
+    # @param offset [Integer, nil] Number of deliveries to skip
+    # @param status [String, nil] Only deliveries with this status
+    #   (see {Sendly::WebhookDelivery::STATUSES})
     # @return [Array<Sendly::WebhookDelivery>]
-    def deliveries(webhook_id)
+    def deliveries(webhook_id, limit: nil, offset: nil, status: nil)
       validate_webhook_id!(webhook_id)
-      response = @client.get("/webhooks/#{URI.encode_www_form_component(webhook_id)}/deliveries")
-      response.map { |data| WebhookDelivery.new(data) }
+      params = {}
+      params[:limit] = limit unless limit.nil?
+      params[:offset] = offset unless offset.nil?
+      params[:status] = status unless status.nil?
+
+      response = @client.get("/webhooks/#{URI.encode_www_form_component(webhook_id)}/deliveries", params)
+      items = response.is_a?(Hash) ? response["deliveries"] : response
+      (items || []).map { |data| WebhookDelivery.new(data) }
     end
 
     # Retry a failed delivery

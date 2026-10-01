@@ -195,6 +195,58 @@ RSpec.describe Sendly::Client do
     end
   end
 
+  describe '#post_multipart' do
+    let(:client) { Sendly::Client.new(api_key: valid_api_key) }
+
+    it 'uploads media whose filename is not ASCII, with the name sent as UTF-8' do
+      png = "\x89PNG\r\n\x1A\n".b + ("\xFF\x00".b * 8)
+      sent = nil
+      stub = stub_request(:post, "#{base_url}/media")
+             .with { |req| sent = req.body.b; true }
+             .to_return(status: 200, headers: { 'Content-Type' => 'application/json' },
+                        body: { 'id' => 'med_x', 'url' => 'https://cdn.example/x.png' }.to_json)
+
+      media = client.media.upload(StringIO.new(png), content_type: 'image/png', filename: 'café.png')
+
+      expect(stub).to have_been_requested.once
+      expect(media.id).to eq('med_x')
+      expect(sent).to include("name=\"file\"; filename=\"café.png\"\r\nContent-Type: image/png\r\n\r\n".b + png)
+    end
+  end
+
+  describe 'ids in the request path' do
+    let(:client) { Sendly::Client.new(api_key: valid_api_key) }
+
+    ['', '.', '..', '%2e', '%2E%2e', '.%2e'].each do |bad|
+      it "refuses the path segment #{bad.inspect} before sending anything" do
+        expect { client.delete("/enterprise/workspaces/ws_1/keys/#{bad}") }
+          .to raise_error(Sendly::ValidationError, /cannot be empty, '\.' or '\.\.'/)
+        expect { client.get("/messages/#{bad}/status") }.to raise_error(Sendly::ValidationError)
+        expect(a_request(:any, /sendly\.live/)).not_to have_been_made
+      end
+    end
+
+    it 'refuses a dot-segment id from a resource method before sending anything' do
+      expect { client.enterprise.workspaces.revoke_key('ws_1', '..') }
+        .to raise_error(Sendly::ValidationError)
+      expect { client.campaigns.delete('.') }.to raise_error(Sendly::ValidationError)
+      expect { client.post_multipart('/media/..', StringIO.new('x')) }.to raise_error(Sendly::ValidationError)
+      expect(a_request(:any, /sendly\.live/)).not_to have_been_made
+    end
+
+    it 'still sends ids that only contain dots among other characters, and leaves the query alone' do
+      stub = stub_request(:delete, "#{base_url}/enterprise/workspaces/ws_1/keys/key...1")
+             .to_return(status: 200, body: { success: true }.to_json)
+      webhooks = stub_request(:delete, "#{base_url}/enterprise/workspaces/ws_1/webhooks?webhookId=..")
+                 .to_return(status: 200, body: { success: true }.to_json)
+
+      expect(client.enterprise.workspaces.revoke_key('ws_1', 'key...1')).to eq('success' => true)
+      client.enterprise.workspaces.delete_webhooks('ws_1', webhook_id: '..')
+      expect(stub).to have_been_requested.once
+      expect(webhooks).to have_been_requested.once
+    end
+  end
+
   describe 'error handling' do
     let(:client) { Sendly::Client.new(api_key: valid_api_key) }
 
@@ -260,6 +312,151 @@ RSpec.describe Sendly::Client do
 
         result = client_with_retries.post('/messages', {})
         expect(result['id']).to eq('msg_abc123')
+      end
+
+      it 'waits out a busy API key check and retries it instead of raising' do
+        allow(client).to receive(:sleep)
+        stub = stub_request(:get, "#{base_url}/account")
+               .to_return(
+                 { status: 429, headers: { 'Retry-After' => '1' },
+                   body: { error: 'too_many_concurrent_verifications',
+                           message: 'Too many API key checks are already running for this account from this ' \
+                                    'address. Try again in 1 second.',
+                           retryAfter: 1 }.to_json },
+                 { status: 200, body: { user: { id: 'user_1' } }.to_json }
+               )
+
+        expect(client.get('/account')).to eq('user' => { 'id' => 'user_1' })
+        expect(stub).to have_been_requested.twice
+        expect(client).to have_received(:sleep).with(1).once
+      end
+
+      it 'raises a failed API key lockout at once, without waiting it out' do
+        allow(client).to receive(:sleep)
+        stub = stub_request(:get, "#{base_url}/account")
+               .to_return(status: 429, headers: { 'Retry-After' => '240' },
+                          body: { error: 'too_many_failed_key_attempts',
+                                  message: 'Too many failed API key attempts. Try again in 240 seconds.',
+                                  retryAfter: 240 }.to_json)
+
+        expect { client.get('/account') }.to raise_error(Sendly::RateLimitError) { |e|
+          expect(e.retry_after).to eq(240)
+          expect(e.response_body['error']).to eq('too_many_failed_key_attempts')
+          expect(e.message).to eq('Too many failed API key attempts. Try again in 240 seconds.')
+        }
+        expect(stub).to have_been_requested.once
+        expect(client).not_to have_received(:sleep)
+      end
+
+      it 'waits out the per-minute provisioning limit and retries with the same key' do
+        allow(client).to receive(:sleep)
+        keys = []
+        stub = stub_request(:post, "#{base_url}/enterprise/workspaces/provision")
+               .with { |request| keys << request.headers['Idempotency-Key'] }
+               .to_return(
+                 { status: 429,
+                   body: { error: 'provision_rate_limit',
+                           message: 'Max 120 provisions per minute.',
+                           retryAfter: 42 }.to_json },
+                 { status: 201, body: { workspace: { id: 'ws_1', name: 'Acme' } }.to_json }
+               )
+
+        expect(client.post('/enterprise/workspaces/provision', { name: 'Acme' }))
+          .to eq('workspace' => { 'id' => 'ws_1', 'name' => 'Acme' })
+        expect(stub).to have_been_requested.twice
+        expect(client).to have_received(:sleep).with(42).once
+        expect(keys.uniq.size).to eq(1)
+      end
+
+      it 'raises the hourly provisioning limit at once, with its retry_after' do
+        allow(client).to receive(:sleep)
+        stub = stub_request(:post, "#{base_url}/enterprise/workspaces/provision")
+               .to_return(status: 429,
+                          body: { error: 'provision_rate_limit',
+                                  message: 'Max 1000 provisions per hour.',
+                                  retryAfter: 3100 }.to_json)
+
+        expect { client.post('/enterprise/workspaces/provision', { name: 'Acme' }) }
+          .to raise_error(Sendly::RateLimitError) { |e| expect(e.retry_after).to eq(3100) }
+        expect(stub).to have_been_requested.once
+        expect(client).not_to have_received(:sleep)
+      end
+
+      it 'raises a rate limit longer than a minute at once' do
+        allow(client).to receive(:sleep)
+        stub = stub_request(:post, "#{base_url}/verify")
+               .to_return(status: 429,
+                          body: { error: 'rate_limit_exceeded',
+                                  message: 'Too many OTPs sent to this phone number. Max 5 per 10 minutes.',
+                                  retryAfter: 600 }.to_json)
+
+        expect { client.post('/verify', { to: '+14155552673' }) }
+          .to raise_error(Sendly::RateLimitError) { |e| expect(e.retry_after).to eq(600) }
+        expect(stub).to have_been_requested.once
+        expect(client).not_to have_received(:sleep)
+      end
+
+      it 'raises a failed API key lockout on an upload at once' do
+        allow(client).to receive(:sleep)
+        stub = stub_request(:post, "#{base_url}/media")
+               .to_return(status: 429, headers: { 'Retry-After' => '240' },
+                          body: { error: 'too_many_failed_key_attempts',
+                                  message: 'Too many failed API key attempts. Try again in 240 seconds.',
+                                  retryAfter: 240 }.to_json)
+
+        expect { client.post_multipart('/media', StringIO.new('fake-image')) }
+          .to raise_error(Sendly::RateLimitError)
+        expect(stub).to have_been_requested.once
+        expect(client).not_to have_received(:sleep)
+      end
+
+      it 'still waits out an ordinary rate limit' do
+        allow(client).to receive(:sleep)
+        stub = stub_request(:get, "#{base_url}/account")
+               .to_return(
+                 { status: 429, body: { error: 'rate_limit_exceeded',
+                                        message: 'Rate limit exceeded. Limit: 60 requests per minute.',
+                                        retryAfter: 7 }.to_json },
+                 { status: 200, body: { user: { id: 'user_1' } }.to_json }
+               )
+
+        expect(client.get('/account')).to eq('user' => { 'id' => 'user_1' })
+        expect(stub).to have_been_requested.twice
+        expect(client).to have_received(:sleep).with(7).once
+      end
+
+      it 'waits out a 429 that carries only a Retry-After header and retries with the same key' do
+        allow(client).to receive(:sleep)
+        keys = []
+        stub = stub_request(:post, "#{base_url}/messages")
+               .with { |request| keys << request.headers['Idempotency-Key'] }
+               .to_return(
+                 { status: 429, headers: { 'Retry-After' => '2' }, body: '' },
+                 { status: 200, body: message_response.to_json }
+               )
+
+        expect(client.post('/messages', {})['id']).to eq('msg_abc123')
+        expect(stub).to have_been_requested.twice
+        expect(client).to have_received(:sleep).with(2).once
+        expect(keys.uniq.size).to eq(1)
+      end
+
+      it 'reads the Retry-After header before the body' do
+        stub_request(:get, "#{base_url}/account")
+          .to_return(status: 429, headers: { 'Retry-After' => '240' },
+                     body: { error: 'too_many_failed_key_attempts', retryAfter: 239 }.to_json)
+
+        expect { client.get('/account') }
+          .to raise_error(Sendly::RateLimitError) { |e| expect(e.retry_after).to eq(240) }
+      end
+
+      it 'falls back to the body when the Retry-After header is not a number of seconds' do
+        stub_request(:get, "#{base_url}/account")
+          .to_return(status: 429, headers: { 'Retry-After' => 'Wed, 21 Oct 2026 07:28:00 GMT' },
+                     body: { error: 'too_many_failed_key_attempts', retryAfter: 240 }.to_json)
+
+        expect { client.get('/account') }
+          .to raise_error(Sendly::RateLimitError) { |e| expect(e.retry_after).to eq(240) }
       end
 
       it 'raises after max retries exceeded' do

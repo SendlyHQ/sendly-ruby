@@ -9,7 +9,7 @@ client = Sendly::Client.new(ENV["SENDLY_API_KEY"] || "sk_test_v1_example")
 # Send an SMS
 begin
   message = client.messages.send(
-    to: "+15551234567",
+    to: "+15125550123",
     text: "Hello from Sendly Ruby SDK!"
   )
 
@@ -25,7 +25,11 @@ rescue Sendly::InsufficientCreditsError => e
 rescue Sendly::ValidationError => e
   puts "Validation error: #{e.message}"
 rescue Sendly::RateLimitError => e
-  puts "Rate limited. Retry after: #{e.retry_after} seconds"
+  if e.response_body&.dig("error") == "too_many_failed_key_attempts"
+    puts "Locked out after repeated wrong API keys. Fix the key, then wait #{e.retry_after} seconds"
+  else
+    puts "Rate limited. Retry after: #{e.retry_after} seconds"
+  end
 rescue Sendly::Error => e
   puts "Error: #{e.message}"
 end

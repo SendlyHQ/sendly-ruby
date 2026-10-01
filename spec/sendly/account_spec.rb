@@ -18,6 +18,103 @@ RSpec.describe Sendly::AccountResource do
     }.merge(overrides)
   end
 
+  describe '#get' do
+    let(:account_body) do
+      {
+        'user' => { 'id' => 'user_1', 'email' => 'a@example.com', 'createdAt' => '2026-01-15T10:00:00.000Z' },
+        'organization' => { 'id' => 'org_1', 'name' => 'Acme', 'isPersonal' => false },
+        'credits' => { 'balance' => 500, 'reservedBalance' => 10 },
+        'verification' => {
+          'status' => 'approved', 'type' => 'toll_free', 'region' => 'us',
+          'submittedAt' => '2026-01-16T10:00:00.000Z', 'updatedAt' => '2026-01-17T10:00:00.000Z'
+        },
+        'apiKey' => {
+          'id' => 'key_1', 'name' => 'CI', 'type' => 'test', 'scopes' => ['sms:send'],
+          'createdAt' => '2026-01-15T10:00:00.000Z', 'lastUsedAt' => nil
+        },
+        'limits' => { 'messagesPerMinute' => 60, 'messagesPerDay' => 100 }
+      }
+    end
+
+    it 'reads the user, workspace and key the API nests in the response' do
+      stub_request_with_auth(:get, '/account', response_body: account_body)
+
+      result = account.get
+
+      expect(result.id).to eq('user_1')
+      expect(result.email).to eq('a@example.com')
+      expect(result.created_at).to eq(Time.parse('2026-01-15T10:00:00.000Z'))
+      expect(result.name).to eq('Acme')
+      expect(result.organization_id).to eq('org_1')
+      expect(result.organization).to eq(account_body['organization'])
+      expect(result.credits).to eq(account_body['credits'])
+      expect(result.verification).to eq(account_body['verification'])
+      expect(result.api_key).to eq(account_body['apiKey'])
+      expect(result.limits).to eq(account_body['limits'])
+      expect(result.raw).to eq(account_body)
+    end
+
+    it 'has no workspace for a key that is not bound to one' do
+      stub_request_with_auth(:get, '/account', response_body: account_body.merge('organization' => nil))
+
+      result = account.get
+
+      expect(result.id).to eq('user_1')
+      expect(result.organization).to be_nil
+      expect(result.organization_id).to be_nil
+      expect(result.name).to be_nil
+    end
+  end
+
+  describe '#create_api_key' do
+    def created_key_body(type)
+      {
+        'id' => 'key_new', 'name' => 'CI', 'key' => "sk_#{type}_v1_secret", 'keyPrefix' => "sk_#{type}_v1_se",
+        'type' => type, 'createdAt' => '2026-09-25T10:00:00.000Z', 'expiresAt' => nil,
+        'apiKey' => { 'id' => 'key_new', 'name' => 'CI', 'type' => type, 'scopes' => ['sms:send'] }
+      }
+    end
+
+    it 'sends type test by default' do
+      stub = stub_request(:post, "#{base_url}/account/keys")
+             .with(body: { name: 'CI', type: 'test' }.to_json)
+             .to_return(status: 200, body: created_key_body('test').to_json,
+                        headers: { 'Content-Type' => 'application/json' })
+
+      result = account.create_api_key('CI')
+
+      expect(stub).to have_been_requested
+      expect(result['key']).to eq('sk_test_v1_secret')
+      expect(result.dig('apiKey', 'id')).to eq('key_new')
+    end
+
+    it 'creates a live key with the scopes it is given' do
+      stub = stub_request(:post, "#{base_url}/account/keys")
+             .with(body: hash_including(name: 'Prod', type: 'live', scopes: ['sms:send']))
+             .to_return(status: 200, body: created_key_body('live').to_json,
+                        headers: { 'Content-Type' => 'application/json' })
+
+      account.create_api_key('Prod', type: 'live', scopes: ['sms:send'])
+
+      expect(stub).to have_been_requested
+    end
+
+    it 'sends expiresAt when given' do
+      stub = stub_request(:post, "#{base_url}/account/keys")
+             .with(body: { name: 'CI', type: 'test', expiresAt: '2027-01-01T00:00:00Z' }.to_json)
+             .to_return(status: 200, body: created_key_body('test').to_json,
+                        headers: { 'Content-Type' => 'application/json' })
+
+      account.create_api_key('CI', expires_at: '2027-01-01T00:00:00Z')
+
+      expect(stub).to have_been_requested
+    end
+
+    it 'rejects a type other than test or live before sending' do
+      expect { account.create_api_key('CI', type: 'prod') }.to raise_error(ArgumentError, /test.*live/)
+    end
+  end
+
   describe '#api_keys' do
     it 'lists keys from /account/keys and unwraps the keys envelope' do
       stub_request_with_auth(:get, '/account/keys',
@@ -46,6 +143,35 @@ RSpec.describe Sendly::AccountResource do
 
       expect(key).to be_a(Sendly::ApiKey)
       expect(key.name).to eq('Production')
+    end
+
+    it 'reads the scopes and revocation the single-key response sends' do
+      stub_request_with_auth(:get, '/account/keys/key_1',
+                             response_body: {
+                               'id' => 'key_1', 'name' => 'Old', 'type' => 'live',
+                               'prefix' => 'sk_live_v1_ab...', 'scopes' => ['sms:send'],
+                               'isActive' => false, 'createdAt' => '2026-01-15T10:00:00.000Z',
+                               'lastUsedAt' => nil, 'expiresAt' => nil,
+                               'revokedAt' => '2026-09-25T10:00:00.000Z'
+                             })
+
+      key = account.api_key('key_1')
+
+      expect(key.permissions).to eq(['sms:send'])
+      expect(key.scopes).to eq(['sms:send'])
+      expect(key.is_active).to be false
+      expect(key.revoked?).to be true
+      expect(key.revoked_at).to eq(Time.parse('2026-09-25T10:00:00.000Z'))
+    end
+
+    it 'reports an active key as not revoked' do
+      stub_request_with_auth(:get, '/account/keys/key_abc123', response_body: api_key_response)
+
+      key = account.api_key('key_abc123')
+
+      expect(key.revoked?).to be false
+      expect(key.is_active).to be true
+      expect(key.revoked_at).to be_nil
     end
   end
 
@@ -95,6 +221,20 @@ RSpec.describe Sendly::AccountResource do
     end
   end
 
+  describe '#credits' do
+    it 'reads the reserved and available balances the API sends' do
+      stub_request_with_auth(:get, '/credits',
+                             response_body: { 'balance' => 100, 'reservedBalance' => 10,
+                                              'availableBalance' => 90, 'billingMode' => 'prepaid' })
+
+      credits = account.credits
+
+      expect(credits.balance).to eq(100)
+      expect(credits.reserved_balance).to eq(10)
+      expect(credits.available_balance).to eq(90)
+    end
+  end
+
   describe '#transactions' do
     it 'unwraps the transactions envelope from /credits/transactions' do
       stub_request_with_auth(:get, '/credits/transactions',
@@ -119,6 +259,28 @@ RSpec.describe Sendly::AccountResource do
                              response_body: { 'transactions' => [] })
 
       expect(account.transactions).to eq([])
+    end
+
+    it 'lists every transaction type the ledger records' do
+      expect(Sendly::CreditTransaction::TYPES)
+        .to include('purchase', 'usage', 'refund', 'bonus', 'transfer', 'admin_grant', 'admin_seed')
+    end
+
+    it 'keeps a transfer as the API sends it' do
+      stub_request_with_auth(:get, '/credits/transactions',
+                             response_body: {
+                               'transactions' => [
+                                 { 'id' => 'ctx_2', 'amount' => -500, 'balance_after' => 1500,
+                                   'type' => 'transfer', 'description' => nil,
+                                   'created_at' => '2026-09-25T10:00:00Z' }
+                               ]
+                             })
+
+      tx = account.transactions.first
+
+      expect(tx.type).to eq('transfer')
+      expect(Sendly::CreditTransaction::TYPES).to include(tx.type)
+      expect(tx.description).to be_nil
     end
   end
 end

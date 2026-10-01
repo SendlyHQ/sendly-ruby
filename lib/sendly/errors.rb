@@ -114,7 +114,7 @@ module Sendly
 
   # Convert API response to appropriate error
   class ErrorFactory
-    def self.from_response(status, body)
+    def self.from_response(status, body, retry_after_header: nil)
       message = body["message"] || body["error"] || "Unknown error"
       code = body["code"]
       details = body["details"]
@@ -129,7 +129,7 @@ module Sendly
               when 404
                 NotFoundError.new(message)
               when 429
-                retry_after = body["retry_after"] || body["retryAfter"]
+                retry_after = parse_retry_after(retry_after_header) || body["retry_after"] || body["retryAfter"]
                 RateLimitError.new(message, retry_after: retry_after)
               when 500..599
                 ServerError.new(message, status_code: status)
@@ -138,5 +138,14 @@ module Sendly
               end
       error.with_response_body(body)
     end
+
+    def self.parse_retry_after(value)
+      text = value.to_s.strip
+      return text.to_i if text.match?(/\A\d+\z/)
+      return text.to_f if text.match?(/\A\d+\.\d+\z/)
+
+      nil
+    end
+    private_class_method :parse_retry_after
   end
 end

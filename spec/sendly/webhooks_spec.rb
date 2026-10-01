@@ -549,6 +549,16 @@ RSpec.describe Sendly::Webhooks do
       expect(event.data.to_h).to have_key(:hangup_class)
     end
 
+    it 'exposes the channel of a call event' do
+      %w[call.started call.completed call.recording.ready].each do |type|
+        event = parse(type, id: 'call_1', object: 'call', kind: 'pstn', channel: 'whatsapp',
+                            direction: 'inbound', status: 'active')
+
+        expect(event.data[:channel]).to eq('whatsapp')
+        expect(event.data.channel).to eq('whatsapp')
+      end
+    end
+
     # The dangerous one: contact.auto_flagged carries the contact under `id`
     # and the message that failed under `message_id`. Reading the contact id as
     # the message id makes a handler act on the wrong row.

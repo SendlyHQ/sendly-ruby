@@ -256,17 +256,11 @@ RSpec.describe Sendly::Messages do
       end
 
       it 'indicates has_more when more pages exist' do
-        response = {
-          'data' => [message_response],
-          'count' => 100,
-          'limit' => 20,
-          'offset' => 0
-        }
-
         stub_request_with_auth(:get, '/messages?limit=20&offset=0',
-                               response_body: response)
+                               response_body: message_list_response([message_response], total: 100))
 
         list = messages.list
+        expect(list.total).to eq(100)
         expect(list.has_more).to be true
       end
     end
@@ -374,15 +368,13 @@ RSpec.describe Sendly::Messages do
         page1 = message_list_response([
           message_response(id: 'msg_1'),
           message_response(id: 'msg_2')
-        ], total: 4)
-        page1['offset'] = 0
+        ], total: 4, limit: 2, offset: 0)
 
         # Second page
         page2 = message_list_response([
           message_response(id: 'msg_3'),
           message_response(id: 'msg_4')
-        ], total: 4)
-        page2['offset'] = 2
+        ], total: 4, limit: 2, offset: 2)
 
         stub_request_with_auth(:get, '/messages?limit=2&offset=0',
                                response_body: page1)
@@ -426,6 +418,18 @@ RSpec.describe Sendly::Messages do
         expect(enumerator.first).to be_a(Sendly::Message)
       end
 
+      it 'stops at an empty page even when the API says there are more' do
+        stub = stub_request_with_auth(:get, '/messages?limit=100&offset=0',
+                                      response_body: message_list_response([], total: 5, limit: 100, offset: 0))
+               .then.to_return(status: 200, body: message_list_response([message_response]).to_json)
+
+        collected = []
+        messages.each { |msg| collected << msg.id }
+
+        expect(collected).to be_empty
+        expect(stub).to have_been_requested.once
+      end
+
       it 'stops pagination when no more pages' do
         stub_request_with_auth(:get, '/messages?limit=100&offset=0',
                                response_body: message_list_response([message_response]))
@@ -458,6 +462,97 @@ RSpec.describe Sendly::Messages do
           messages.each { |msg| puts msg }
         }.to raise_error(Sendly::ServerError)
       end
+    end
+  end
+
+  describe 'pagination against the list envelope the API sends' do
+    def api_page(ids, total:, limit:, offset:)
+      message_list_response(ids.map { |id| message_response('id' => id) }, total: total, limit: limit, offset: offset)
+    end
+
+    it 'reads total, limit, offset and has_more from pagination, not the page count' do
+      stub_request_with_auth(:get, '/messages?limit=2&offset=0',
+                             response_body: api_page(%w[m1 m2], total: 5, limit: 2, offset: 0))
+
+      list = messages.list(limit: 2)
+
+      expect(list.count).to eq(2)
+      expect(list.total).to eq(5)
+      expect(list.limit).to eq(2)
+      expect(list.offset).to eq(0)
+      expect(list.has_more).to be true
+    end
+
+    it 'walks every page in #each' do
+      stubs = [
+        stub_request_with_auth(:get, '/messages?limit=2&offset=0',
+                               response_body: api_page(%w[m1 m2], total: 5, limit: 2, offset: 0)),
+        stub_request_with_auth(:get, '/messages?limit=2&offset=2',
+                               response_body: api_page(%w[m3 m4], total: 5, limit: 2, offset: 2)),
+        stub_request_with_auth(:get, '/messages?limit=2&offset=4',
+                               response_body: api_page(%w[m5], total: 5, limit: 2, offset: 4))
+      ]
+
+      ids = messages.each(batch_size: 2).map(&:id)
+
+      expect(ids).to eq(%w[m1 m2 m3 m4 m5])
+      stubs.each { |stub| expect(stub).to have_been_requested.once }
+    end
+
+    it 'advances by the rows returned when batch_size is over the API limit of 100' do
+      first = stub_request_with_auth(:get, '/messages?limit=100&offset=0',
+                                     response_body: api_page((0...100).map { |i| "m#{i}" },
+                                                             total: 150, limit: 100, offset: 0))
+      second = stub_request_with_auth(:get, '/messages?limit=100&offset=100',
+                                      response_body: api_page((100...150).map { |i| "m#{i}" },
+                                                              total: 150, limit: 100, offset: 100))
+
+      ids = messages.each(batch_size: 200).map(&:id)
+
+      expect(ids.length).to eq(150)
+      expect(ids.uniq.length).to eq(150)
+      expect(first).to have_been_requested.once
+      expect(second).to have_been_requested.once
+      expect(a_request(:get, "#{base_url}/messages?limit=100&offset=200")).not_to have_been_made
+    end
+  end
+
+  describe 'MMS fields' do
+    it 'reads media_urls and message_format as a list row sends them' do
+      message = Sendly::Message.new('id' => 'm', 'media_urls' => ['https://cdn.example.com/x.jpg'],
+                                    'message_format' => 'mms')
+
+      expect(message.media_urls).to eq(['https://cdn.example.com/x.jpg'])
+      expect(message.message_format).to eq('mms')
+      expect(message.to_h).to include(media_urls: ['https://cdn.example.com/x.jpg'], message_format: 'mms')
+    end
+
+    it 'reads the camelCase keys too' do
+      message = Sendly::Message.new('id' => 'm', 'mediaUrls' => ['https://cdn.example.com/x.jpg'],
+                                    'messageFormat' => 'mms')
+
+      expect(message.media_urls).to eq(['https://cdn.example.com/x.jpg'])
+      expect(message.message_format).to eq('mms')
+    end
+
+    it 'is an SMS with no media when the response has neither key' do
+      message = Sendly::Message.new(message_response)
+
+      expect(message.media_urls).to eq([])
+      expect(message.message_format).to eq('sms')
+    end
+
+    it 'keeps the attachments of an MMS send' do
+      stub_request_with_auth(:post, '/messages',
+                             response_body: message_response(
+                               'mediaUrls' => ['https://cdn.example.com/x.jpg'], 'media_urls' => ['https://cdn.example.com/x.jpg'],
+                               'messageFormat' => 'mms', 'message_format' => 'mms'
+                             ))
+
+      message = messages.send(to: '+15551234567', text: 'Look', media_urls: ['https://cdn.example.com/x.jpg'])
+
+      expect(message.media_urls).to eq(['https://cdn.example.com/x.jpg'])
+      expect(message.message_format).to eq('mms')
     end
   end
 end

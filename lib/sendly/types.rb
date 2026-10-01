@@ -63,6 +63,12 @@ module Sendly
     # @return [Hash, nil] AI classification metadata for inbound messages
     attr_reader :ai_metadata
 
+    # @return [Array<String>] Media attached to the message; empty when there is none
+    attr_reader :media_urls
+
+    # @return [String] "sms", "mms", "rcs" or "whatsapp"; "sms" when the response does not say
+    attr_reader :message_format
+
     # Message status constants (sending removed - doesn't exist in database)
     STATUSES = %w[queued sent delivered failed bounced retrying].freeze
 
@@ -90,6 +96,8 @@ module Sendly
       @retry_count = data["retryCount"] || 0
       @metadata = data["metadata"]
       @ai_metadata = data["aiMetadata"]
+      @media_urls = data["mediaUrls"] || data["media_urls"] || []
+      @message_format = data["messageFormat"] || data["message_format"] || "sms"
     end
 
     # Check if message was delivered
@@ -133,7 +141,9 @@ module Sendly
         error_code: error_code,
         retry_count: retry_count,
         metadata: metadata,
-        ai_metadata: ai_metadata
+        ai_metadata: ai_metadata,
+        media_urls: media_urls,
+        message_format: message_format
       }.compact
     end
 
@@ -155,7 +165,7 @@ module Sendly
     # @return [Array<Message>] Messages in this page
     attr_reader :data
 
-    # @return [Integer] Total number of messages
+    # @return [Integer] Total number of messages that match the query, across all pages
     attr_reader :total
 
     # @return [Integer] Current limit
@@ -168,11 +178,16 @@ module Sendly
     attr_reader :has_more
 
     def initialize(response)
+      pagination = response["pagination"] || {}
       @data = (response["data"] || []).map { |m| Message.new(m) }
-      @total = response["count"] || @data.length
-      @limit = response["limit"] || 20
-      @offset = response["offset"] || 0
-      @has_more = (@offset + @data.length) < @total
+      @total = pagination["total"] || response["total"] || response["count"] || @data.length
+      @limit = pagination["limit"] || response["limit"] || 20
+      @offset = pagination["offset"] || response["offset"] || 0
+      @has_more = if pagination.key?("hasMore")
+                    pagination["hasMore"]
+                  else
+                    (@offset + @data.length) < @total
+                  end
     end
 
     # Iterate over messages
@@ -433,14 +448,31 @@ module Sendly
   end
 
   # Result of testing a webhook
+  #
+  # Only a delivered test comes back as a result: when the test delivery
+  # fails, {Sendly::WebhooksResource#test} raises {Sendly::ValidationError}
+  # with the API's message.
   class WebhookTestResult
     attr_reader :success, :status_code, :response_time_ms, :error
 
+    # @return [String, nil] The API's summary of the test delivery
+    attr_reader :message
+
+    # @return [String, nil] ID of the test delivery
+    attr_reader :delivery_id
+
+    # @return [Hash] The raw parsed response
+    attr_reader :raw
+
     def initialize(data)
+      delivery = data["delivery"] || {}
+      @raw = data
       @success = data["success"]
-      @status_code = data["status_code"] || data["statusCode"]
-      @response_time_ms = data["response_time_ms"] || data["responseTimeMs"]
-      @error = data["error"]
+      @status_code = data["status_code"] || data["statusCode"] || delivery["status_code"]
+      @response_time_ms = data["response_time_ms"] || data["responseTimeMs"] || delivery["response_time"]
+      @error = data["error"] || delivery["error"]
+      @message = data["message"]
+      @delivery_id = delivery["id"] || delivery["delivery_id"]
     end
 
     def success?
@@ -449,14 +481,49 @@ module Sendly
   end
 
   # Result of rotating webhook secret
+  #
+  # The API signs deliveries with the new secret from the moment the rotation
+  # returns and does not keep the old one, so {#new_secret} is the only secret
+  # that verifies deliveries from then on.
   class WebhookSecretRotation
-    attr_reader :webhook, :new_secret, :old_secret_expires_at, :message
+    # @return [Sendly::Webhook, nil] Always +nil+: the rotation response does not include the webhook
+    attr_reader :webhook
+
+    # @return [String] The new signing secret. It is shown only once.
+    attr_reader :new_secret
+
+    # @return [Time, nil] Always +nil+: the API does not keep the old secret, so it has no expiry
+    attr_reader :old_secret_expires_at
+
+    # @return [String, nil] Confirmation message
+    attr_reader :message
+
+    # @return [String, nil] The webhook's ID
+    attr_reader :id
+
+    # @return [Integer, nil] The webhook's secret version as the API reports it
+    attr_reader :new_secret_version
+
+    # @return [Integer, nil] The grace period the API reports (24). The old
+    #   secret is not kept, so it does not verify deliveries during it.
+    attr_reader :grace_period_hours
+
+    # @return [Time, nil] When the secret was rotated
+    attr_reader :rotated_at
+
+    # @return [Hash] The raw parsed response
+    attr_reader :raw
 
     def initialize(data)
-      @webhook = Webhook.new(data["webhook"])
-      @new_secret = data["new_secret"] || data["newSecret"]
+      @raw = data
+      @webhook = data["webhook"] ? Webhook.new(data["webhook"]) : nil
+      @new_secret = data["new_secret"] || data["newSecret"] || data["secret"]
       @old_secret_expires_at = parse_time(data["old_secret_expires_at"] || data["oldSecretExpiresAt"])
       @message = data["message"]
+      @id = data["id"]
+      @new_secret_version = data["new_secret_version"] || data["newSecretVersion"]
+      @grace_period_hours = data["grace_period_hours"] || data["gracePeriodHours"]
+      @rotated_at = parse_time(data["rotated_at"] || data["rotatedAt"])
     end
 
     private
@@ -475,13 +542,56 @@ module Sendly
 
   # Represents account information
   class Account
-    attr_reader :id, :email, :name, :created_at
+    # @return [String, nil] The user's ID
+    attr_reader :id
+
+    # @return [String, nil] The user's email address
+    attr_reader :email
+
+    # @return [String, nil] The name of the workspace the API key belongs to,
+    #   or +nil+ when the key is not bound to a workspace
+    attr_reader :name
+
+    # @return [Time, nil] When the user signed up
+    attr_reader :created_at
+
+    # @return [Hash, nil] The workspace the API key belongs to
+    #   (+"id"+, +"name"+, +"isPersonal"+), or +nil+
+    attr_reader :organization
+
+    # @return [String, nil] The workspace's ID, the +organization_id+ in webhook payloads
+    attr_reader :organization_id
+
+    # @return [Hash, nil] Credit balances (+"balance"+, +"reservedBalance"+)
+    attr_reader :credits
+
+    # @return [Hash, nil] Business verification (+"status"+, +"type"+, +"region"+,
+    #   +"submittedAt"+, +"updatedAt"+), or +nil+ when there is none
+    attr_reader :verification
+
+    # @return [Hash, nil] The API key making the call (+"id"+, +"name"+, +"type"+,
+    #   +"scopes"+, +"createdAt"+, +"lastUsedAt"+)
+    attr_reader :api_key
+
+    # @return [Hash, nil] Sending limits (+"messagesPerMinute"+, +"messagesPerDay"+)
+    attr_reader :limits
+
+    # @return [Hash] The raw parsed response
+    attr_reader :raw
 
     def initialize(data)
-      @id = data["id"]
-      @email = data["email"]
-      @name = data["name"]
-      @created_at = parse_time(data["created_at"] || data["createdAt"])
+      user = data["user"] || {}
+      @raw = data
+      @organization = data["organization"]
+      @organization_id = @organization && @organization["id"]
+      @id = user["id"] || data["id"]
+      @email = user["email"] || data["email"]
+      @name = (@organization && @organization["name"]) || data["name"]
+      @created_at = parse_time(user["createdAt"] || user["created_at"] || data["created_at"] || data["createdAt"])
+      @credits = data["credits"]
+      @verification = data["verification"]
+      @api_key = data["apiKey"] || data["api_key"]
+      @limits = data["limits"]
     end
 
     private
@@ -509,8 +619,9 @@ module Sendly
   class CreditTransaction
     attr_reader :id, :type, :amount, :balance_after, :description, :message_id, :created_at
 
-    # Transaction type constants
-    TYPES = %w[purchase usage refund adjustment bonus].freeze
+    # Transaction type constants. Auto-recharges are recorded as +purchase+;
+    # +adjustment+ is never recorded.
+    TYPES = %w[purchase usage refund adjustment bonus transfer admin_grant admin_seed].freeze
 
     def initialize(data)
       @id = data["id"]
@@ -542,8 +653,20 @@ module Sendly
 
   # Represents an API key
   class ApiKey
-    attr_reader :id, :name, :type, :prefix, :last_four, :permissions,
+    attr_reader :id, :name, :type, :prefix, :permissions,
                 :created_at, :last_used_at, :expires_at, :is_revoked
+
+    # @return [nil] Always +nil+: no API response carries the last four characters
+    attr_reader :last_four
+
+    # @return [Array<String>] The key's scopes (the same list as {#permissions})
+    attr_reader :scopes
+
+    # @return [Boolean, nil] Whether the key is active, or +nil+ when the response does not say
+    attr_reader :is_active
+
+    # @return [Time, nil] When the key was revoked
+    attr_reader :revoked_at
 
     def initialize(data)
       @id = data["id"]
@@ -551,11 +674,20 @@ module Sendly
       @type = data["type"]
       @prefix = data["prefix"]
       @last_four = data["last_four"] || data["lastFour"]
-      @permissions = data["permissions"] || []
+      @permissions = data["permissions"] || data["scopes"] || []
+      @scopes = data["scopes"] || data["permissions"] || []
       @created_at = parse_time(data["created_at"] || data["createdAt"])
       @last_used_at = parse_time(data["last_used_at"] || data["lastUsedAt"])
       @expires_at = parse_time(data["expires_at"] || data["expiresAt"])
-      @is_revoked = data["is_revoked"] || data["isRevoked"] || false
+      @revoked_at = parse_time(data["revoked_at"] || data["revokedAt"])
+      @is_active = data.key?("isActive") ? data["isActive"] : data["is_active"]
+      @is_revoked = if data.key?("isRevoked") || data.key?("is_revoked")
+                      data["isRevoked"] || data["is_revoked"] || false
+                    elsif !@is_active.nil?
+                      !@is_active
+                    else
+                      !@revoked_at.nil?
+                    end
     end
 
     def test?
@@ -842,13 +974,20 @@ module Sendly
 
     attr_reader :data, :total, :limit, :offset, :has_more
 
-    def initialize(response)
+    # @param response [Hash] The parsed list response
+    # @param limit [Integer, nil] The page size the API used, when the response does not say
+    # @param offset [Integer, nil] The offset the API used, when the response does not say
+    def initialize(response, limit = nil, offset = nil)
       @data = (response["data"] || []).map { |d| Draft.new(d) }
       pagination = response["pagination"] || {}
       @total = pagination["total"] || @data.length
-      @limit = pagination["limit"] || 20
-      @offset = pagination["offset"] || 0
-      @has_more = pagination["hasMore"] || pagination["has_more"] || false
+      @limit = pagination["limit"] || limit || 20
+      @offset = pagination["offset"] || offset || 0
+      @has_more = if pagination.key?("hasMore") || pagination.key?("has_more")
+                    pagination["hasMore"] || pagination["has_more"] || false
+                  else
+                    (@offset + @data.length) < @total
+                  end
     end
 
     def each(&block)

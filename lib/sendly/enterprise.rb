@@ -102,13 +102,23 @@ module Sendly
       submit_verification(workspace_id, **partial_updates)
     end
 
-    def inherit_verification(workspace_id, source_workspace_id:)
+    # Give a workspace the verification of another workspace you own.
+    #
+    # By default the workspace shares the source's verification and sending
+    # number. Pass +purchase_new_number: true+ to copy only the business
+    # details and buy the workspace its own toll-free number; the response
+    # then has +"newNumber" => true+.
+    #
+    #   client.enterprise.workspaces.inherit_verification(workspace_id,
+    #     source_workspace_id: source_id, purchase_new_number: true)
+    def inherit_verification(workspace_id, source_workspace_id:, purchase_new_number: nil)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
       raise ArgumentError, "Source workspace ID is required" if source_workspace_id.nil? || source_workspace_id.empty?
 
-      @client.post("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/verification/inherit", {
-        source_workspace_id: source_workspace_id
-      })
+      body = { sourceWorkspaceId: source_workspace_id }
+      body[:purchaseNewNumber] = purchase_new_number unless purchase_new_number.nil?
+
+      @client.post("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/verification/inherit", body)
     end
 
     def get_verification(workspace_id)
@@ -134,12 +144,13 @@ module Sendly
       @client.get("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/credits")
     end
 
-    def create_key(workspace_id, name: nil, type: nil)
+    def create_key(workspace_id, name: nil, type: nil, scopes: nil)
       raise ArgumentError, "Workspace ID is required" if workspace_id.nil? || workspace_id.empty?
+      raise ArgumentError, "Key name is required" if name.nil? || name.to_s.empty?
 
-      body = {}
-      body[:name] = name if name
+      body = { name: name }
       body[:type] = type if type
+      body[:scopes] = scopes unless scopes.nil?
 
       @client.post("/enterprise/workspaces/#{URI.encode_www_form_component(workspace_id)}/keys", body)
     end
@@ -245,7 +256,7 @@ module Sendly
 
     def provision_bulk(workspaces)
       raise ArgumentError, "Workspaces array is required" if workspaces.nil? || !workspaces.is_a?(Array) || workspaces.empty?
-      raise ArgumentError, "Maximum 50 workspaces per bulk provision" if workspaces.length > 50
+      raise ArgumentError, "Maximum 100 workspaces per bulk provision" if workspaces.length > 100
 
       @client.post("/enterprise/workspaces/provision/bulk", { workspaces: workspaces })
     end
@@ -470,7 +481,7 @@ module Sendly
                      else "application/octet-stream"
                      end
 
-      filename = File.basename(file_path)
+      filename = File.basename(file_path).gsub('"', "%22").gsub("\r", "%0D").gsub("\n", "%0A")
 
       boundary = "SendlyRuby#{SecureRandom.hex(16)}"
       body_parts = []
@@ -507,7 +518,7 @@ module Sendly
       req["X-Organization-Id"] = @client.organization_id if @client.organization_id
       # Single-use auto key (this path has no retry loop).
       req["Idempotency-Key"] = @client.generate_idempotency_key
-      req.body = body_parts.join
+      req.body = body_parts.map { |part| part.to_s.b }.join
 
       response = http.request(req)
       body = response.body.nil? || response.body.empty? ? {} : JSON.parse(response.body)

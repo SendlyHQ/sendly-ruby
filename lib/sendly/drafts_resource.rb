@@ -24,7 +24,8 @@ module Sendly
       params[:offset] = offset if offset
 
       response = @client.get("/drafts", params.compact)
-      DraftList.new(response)
+      page_size = limit.to_s.empty? ? 50 : [limit.to_s.to_i, 100].min
+      DraftList.new(response, page_size, offset.to_s.to_i)
     end
 
     def get(id)

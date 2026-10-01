@@ -67,12 +67,19 @@ module SpecHelpers
     }.merge(overrides)
   end
 
-  def message_list_response(messages = [], total: nil)
+  def message_list_response(messages = [], total: nil, limit: 20, offset: 0)
+    total ||= offset + messages.length
     {
       'data' => messages,
-      'count' => total || messages.length,
-      'limit' => 20,
-      'offset' => 0
+      'pagination' => {
+        'total' => total,
+        'limit' => limit,
+        'offset' => offset,
+        'page' => (offset / limit) + 1,
+        'totalPages' => (total.to_f / limit).ceil,
+        'hasMore' => offset + messages.length < total
+      },
+      'count' => messages.length
     }
   end
 

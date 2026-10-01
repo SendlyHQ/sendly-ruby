@@ -232,10 +232,11 @@ module Sendly
     # @param body [Hash] Request body
     # @param idempotency_key [String, nil] Caller-supplied idempotency key (optional)
     # @param auto_idempotency_key [Boolean] Auto-generate a key when none is supplied (default: true)
+    # @param retry_server_errors [Boolean] Retry a 5xx before raising it (default: true)
     # @return [Hash] Response body
-    def post(path, body = {}, idempotency_key: nil, auto_idempotency_key: true)
+    def post(path, body = {}, idempotency_key: nil, auto_idempotency_key: true, retry_server_errors: true)
       request(:post, path, body: body, idempotency_key: idempotency_key,
-                           auto_idempotency_key: auto_idempotency_key)
+                           auto_idempotency_key: auto_idempotency_key, retry_server_errors: retry_server_errors)
     end
 
     # Make a PATCH request
@@ -312,8 +313,10 @@ module Sendly
     # @param content_type [String] MIME type of the file
     # @param filename [String] Name for the uploaded file
     # @param idempotency_key [String, nil] Caller-supplied idempotency key (optional)
+    # @param retry_server_errors [Boolean] Retry a 5xx before raising it (default: true)
     # @return [Hash] Response body
-    def post_multipart(path, file, content_type: "image/jpeg", filename: "upload.jpg", idempotency_key: nil)
+    def post_multipart(path, file, content_type: "image/jpeg", filename: "upload.jpg", idempotency_key: nil,
+                       retry_server_errors: true)
       uri = build_uri(path, {})
       http = build_http(uri)
 
@@ -323,10 +326,11 @@ module Sendly
       boundary = "SendlyRuby#{SecureRandom.hex(16)}"
 
       file_data = file.is_a?(String) ? File.binread(file) : file.read
+      safe_name = filename.to_s.gsub('"', "%22").gsub("\r", "%0D").gsub("\n", "%0A")
 
       body = []
       body << "--#{boundary}\r\n"
-      body << "Content-Disposition: form-data; name=\"file\"; filename=\"#{filename}\"\r\n"
+      body << "Content-Disposition: form-data; name=\"file\"; filename=\"#{safe_name}\"\r\n"
       body << "Content-Type: #{content_type}\r\n\r\n"
       body << file_data
       body << "\r\n--#{boundary}--\r\n"
@@ -337,7 +341,7 @@ module Sendly
       req["User-Agent"] = "sendly-ruby/#{VERSION}"
       req["Content-Type"] = "multipart/form-data; boundary=#{boundary}"
       req["X-Organization-Id"] = @organization_id if @organization_id
-      req.body = body.join
+      req.body = body.map { |part| part.to_s.b }.join
 
       attempt = 0
       begin
@@ -350,18 +354,14 @@ module Sendly
         raise NetworkError, "Connection failed: #{e.message}"
       rescue RateLimitError => e
         attempt += 1
-        if attempt <= max_retries && e.retry_after
+        if attempt <= max_retries && e.retry_after && retryable_rate_limit?(e)
           sleep(e.retry_after)
           retry
         end
         raise
       rescue ServerError => e
         attempt += 1
-        if attempt <= max_retries
-          # A 5xx response may be cached under the key server-side, so an
-          # auto-generated key is rotated to let the retry re-execute.
-          # Caller-supplied keys are never rotated.
-          key = generate_idempotency_key if explicit_key.nil?
+        if retry_server_errors && attempt <= max_retries
           sleep(2 ** attempt)
           retry
         end
@@ -378,6 +378,17 @@ module Sendly
 
     private
 
+    RETRYABLE_RATE_LIMIT_CODES = [
+      nil, "rate_limit_exceeded", "provision_rate_limit", "too_many_concurrent_verifications"
+    ].freeze
+    MAX_RETRY_WAIT_SECONDS = 60
+    private_constant :RETRYABLE_RATE_LIMIT_CODES, :MAX_RETRY_WAIT_SECONDS
+
+    def retryable_rate_limit?(error)
+      code = error.response_body.is_a?(Hash) ? error.response_body["error"] : nil
+      RETRYABLE_RATE_LIMIT_CODES.include?(code) && error.retry_after.to_f <= MAX_RETRY_WAIT_SECONDS
+    end
+
     def validate_api_key!
       raise AuthenticationError, "API key is required" if api_key.nil? || api_key.empty?
 
@@ -387,7 +398,7 @@ module Sendly
     end
 
     def request(method, path, params: {}, body: nil, unversioned: false, idempotency_key: nil,
-                auto_idempotency_key: true)
+                auto_idempotency_key: true, retry_server_errors: true)
       uri = build_uri(path, params, unversioned: unversioned)
       http = build_http(uri)
       req = build_request(method, uri, body)
@@ -407,18 +418,14 @@ module Sendly
         raise NetworkError, "Connection failed: #{e.message}"
       rescue RateLimitError => e
         attempt += 1
-        if attempt <= max_retries && e.retry_after
+        if attempt <= max_retries && e.retry_after && retryable_rate_limit?(e)
           sleep(e.retry_after)
           retry
         end
         raise
       rescue ServerError => e
         attempt += 1
-        if attempt <= max_retries
-          # A 5xx response may be cached under the key server-side, so an
-          # auto-generated key is rotated to let the retry re-execute.
-          # Caller-supplied keys are never rotated.
-          key = generate_idempotency_key if key && explicit_key.nil?
+        if retry_server_errors && attempt <= max_retries
           sleep(2 ** attempt) # Exponential backoff
           retry
         end
@@ -444,6 +451,7 @@ module Sendly
     end
 
     def build_uri(path, params, unversioned: false)
+      validate_path_segments!(path)
       base = unversioned ? api_origin : base_url
       url = "#{base}#{path}"
       uri = URI.parse(url)
@@ -454,6 +462,16 @@ module Sendly
       end
 
       uri
+    end
+
+    DOT_SEGMENT = /\A(?:\.|%2e){1,2}\z/i
+    private_constant :DOT_SEGMENT
+
+    def validate_path_segments!(path)
+      segments = path.to_s.split("?", 2).first.to_s.split("/", -1).drop(1)
+      return unless segments.any? { |segment| segment.empty? || DOT_SEGMENT.match?(segment) }
+
+      raise ValidationError, "IDs in a request path cannot be empty, '.' or '..'"
     end
 
     # Derive the bare API origin (scheme + host [+ non-default port]) from the
@@ -506,7 +524,8 @@ module Sendly
 
       return body if status >= 200 && status < 300
 
-      raise ErrorFactory.from_response(status, body)
+      retry_after = status == 429 ? response["Retry-After"] : nil
+      raise ErrorFactory.from_response(status, body, retry_after_header: retry_after)
     end
 
     def parse_body(body)

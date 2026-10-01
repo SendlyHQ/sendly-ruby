@@ -23,7 +23,12 @@ module Sendly
   # A phone call placed or received by one of your workspace's numbers.
   #
   # +kind+ is "pstn" for a phone call and "internal" for a browser-to-browser
-  # call between teammates. +status+ is "ringing" or "active" while the call
+  # call between teammates. +channel+ is where the call took place:
+  # "phone", "whatsapp" (a WhatsApp call, for example one placed from the
+  # dashboard) or "browser" (see {CHANNELS}); a value this SDK predates
+  # comes through unchanged, and it is nil when the API doesn't send one.
+  # An inbound WhatsApp call can read "phone" until the carrier labels it.
+  # +status+ is "ringing" or "active" while the call
   # is live and one of the terminal values ("completed", "no_answer", "busy",
   # "cancelled", "declined", "failed") once it has ended; "suspended" can
   # appear on an internal call whose media dropped and may recover.
@@ -40,6 +45,7 @@ module Sendly
     LIVE_STATUSES = %w[ringing active].freeze
     DIRECTIONS = %w[inbound outbound].freeze
     KINDS = %w[pstn internal].freeze
+    CHANNELS = %w[phone whatsapp browser].freeze
     HANDLED_BY = %w[agent dashboard].freeze
     BILLING_STATES = %w[metered settled unbilled].freeze
     RECORDING_STATUSES = %w[recording ready failed].freeze
@@ -60,12 +66,13 @@ module Sendly
       insufficient_credits invalid_number rate_limit_exceeded forbidden
       invalid_request insufficient_permissions agent_in_use agent_limit invalid_voice_mode
       invalid_address e911_not_applicable voice_attach_failed carrier_refused
+      from_number_not_supported
     ].freeze
 
     attr_reader :id, :object, :kind, :direction, :status, :handled_by, :agent_id,
                 :from, :to, :caller_name, :callee_name, :started_at, :answered_at,
                 :ended_at, :duration_secs, :credits_charged, :billing, :hangup_class,
-                :recording_status, :metadata, :transcript
+                :recording_status, :metadata, :transcript, :channel
 
     # @return [Hash] The raw parsed response
     attr_reader :raw
@@ -76,6 +83,7 @@ module Sendly
       @id = data["id"]
       @object = data["object"] || "call"
       @kind = data["kind"]
+      @channel = data["channel"]
       @direction = data["direction"]
       @status = data["status"]
       @handled_by = data["handledBy"] || data["handled_by"]
@@ -125,7 +133,7 @@ module Sendly
 
     def to_h
       {
-        id: id, object: object, kind: kind, direction: direction, status: status,
+        id: id, object: object, kind: kind, channel: channel, direction: direction, status: status,
         handled_by: handled_by, agent_id: agent_id, from: from, to: to,
         caller_name: caller_name, callee_name: callee_name, started_at: started_at,
         answered_at: answered_at, ended_at: ended_at, duration_secs: duration_secs,
@@ -231,9 +239,9 @@ module Sendly
   # +voice_not_enabled+, +outbound_calls_not_enabled+, +agent_not_found+,
   # +number_not_found+ and +call_not_found+; {Sendly::ValidationError} for
   # +invalid_number+, +destination_not_supported+, +agent_required+,
-  # +invalid_metadata+ and +from_number_required+;
-  # {Sendly::InsufficientCreditsError} for +insufficient_credits+;
-  # {Sendly::RateLimitError} for +daily_call_limit+ and
+  # +invalid_metadata+, +from_number_required+ and
+  # +from_number_not_supported+; {Sendly::InsufficientCreditsError} for
+  # +insufficient_credits+; {Sendly::RateLimitError} for +daily_call_limit+ and
   # +rate_limit_exceeded+; {Sendly::APIError} with the HTTP status for
   # +e911_required+ (428), +agent_disabled+ / +no_voice_number+ /
   # +lines_busy+ (409) and +live_key_required+ / +forbidden+ (403); and
@@ -264,7 +272,9 @@ module Sendly
     # @param agent_id [String] The AI agent that talks on the call
     # @param from [String, nil] A voice-enabled number in your workspace.
     #   Optional when the workspace has exactly one; required (the API
-    #   responds 400 +from_number_required+) when it has more.
+    #   responds 400 +from_number_required+) when it has more. Calls can
+    #   only be placed from US and Canadian numbers (400
+    #   +from_number_not_supported+ otherwise).
     # @param context [String, nil] Up to 2000 characters appended to the
     #   agent's instructions for this call only. Not echoed back.
     # @param metadata [Hash{String => String}, nil] Up to 20 string pairs
@@ -275,7 +285,8 @@ module Sendly
     # @return [Sendly::Call] The new call (+status+ "ringing", +handled_by+ "agent")
     # @raise [Sendly::ValidationError] If +to+ or +agent_id+ is missing, or
     #   HTTP 400 (+invalid_number+, +destination_not_supported+,
-    #   +agent_required+, +invalid_metadata+, +from_number_required+)
+    #   +agent_required+, +invalid_metadata+, +from_number_required+,
+    #   +from_number_not_supported+)
     # @raise [Sendly::NotFoundError] HTTP 404 (+voice_not_enabled+,
     #   +outbound_calls_not_enabled+, +agent_not_found+, +number_not_found+)
     # @raise [Sendly::InsufficientCreditsError] HTTP 402 when the balance

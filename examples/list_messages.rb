@@ -8,7 +8,7 @@ client = Sendly::Client.new(ENV["SENDLY_API_KEY"] || "sk_test_v1_example")
 # List recent messages
 puts "=== Recent Messages ==="
 messages = client.messages.list(limit: 10)
-puts "Total: #{messages.total}"
+puts "Total matching: #{messages.total}"
 puts "Has more: #{messages.has_more}"
 puts
 

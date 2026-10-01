@@ -13,8 +13,11 @@ module Sendly
     # Send an SMS, WhatsApp, or RCS message
     #
     # Pass +channel: "whatsapp"+ to send on WhatsApp. WhatsApp sends require
-    # a live API key and a +from+ number with an active WhatsApp connection
-    # (see +client.whatsapp.signup+). Provide exactly one of +text+
+    # the +sms:send+ scope (not +whatsapp:write+), a live API key and a
+    # +from+ number with an active WhatsApp connection (see
+    # +client.whatsapp.signup+). WhatsApp is enabled per person (the user who
+    # owns the API key, not the workspace); while it is off the API responds
+    # 403 +whatsapp_not_enabled+. Provide exactly one of +text+
     # (free-form, max 4096 bytes), +media_urls+ (a single attachment;
     # optional +text+ becomes its caption, max 1024 bytes), or +template+
     # (an approved template). Free-form text and media only deliver inside
@@ -71,7 +74,22 @@ module Sendly
     #   response instead of executing again.
     # @return [Sendly::Message, Sendly::WhatsAppMessage, Sendly::RcsMessage] The sent message
     #
-    # @raise [Sendly::ValidationError] If parameters are invalid
+    # @raise [Sendly::ValidationError] If parameters are invalid, or on
+    #   WhatsApp the 422 +whatsapp_send_failed+ when WhatsApp refused the
+    #   message (final, not retried, not charged; cached under the
+    #   idempotency key and replayed for 24 hours)
+    # @raise [Sendly::ServerError] On WhatsApp, the 502 +whatsapp_send_failed+:
+    #   the message provably never reached the carrier, so it was not sent
+    #   and is safe to send again. It isn't charged and is never cached, so
+    #   the client retries it like any 5xx first under the same idempotency
+    #   key. No send returns 503 +whatsapp_unavailable+.
+    # @raise [Sendly::APIError] On WhatsApp, the 409
+    #   +whatsapp_send_unconfirmed+ (+status_code+ 409): the outcome is
+    #   unknown. The message was marked failed and refunded but may still be
+    #   delivered, so check before sending it again (it could arrive twice).
+    #   It is not retried automatically, and it is cached under the
+    #   idempotency key, so repeating the request with the same key returns
+    #   this answer again.
     # @raise [Sendly::InsufficientCreditsError] If account has no credits
     # @raise [Sendly::RateLimitError] If rate limit is exceeded
     #
@@ -327,7 +345,7 @@ module Sendly
     #
     # @param status [String] Filter by status
     # @param to [String] Filter by recipient
-    # @param batch_size [Integer] Number of messages per request
+    # @param batch_size [Integer] Number of messages per request (the API returns at most 100)
     # @yield [Message] Each message
     # @return [Enumerator] If no block given
     #
@@ -343,9 +361,9 @@ module Sendly
         page = list(limit: batch_size, offset: offset, status: status, to: to)
         page.each(&block)
 
-        break unless page.has_more
+        break if !page.has_more || page.count.zero?
 
-        offset += batch_size
+        offset += page.count
       end
     end
 
@@ -446,7 +464,9 @@ module Sendly
     # @param metadata [Hash] Shared metadata for all messages (max 4KB). Each message can also have its own metadata hash which takes priority.
     # @param idempotency_key [String] Idempotency key for this operation
     #   (1-255 printable ASCII characters, optional)
-    # @return [Hash] Batch response with batch_id and status
+    # @return [Hash] Batch result: +batchId+, +status+ (processing, completed,
+    #   partial_failure or failed), +total+, +sent+, +failed+, +creditsUsed+,
+    #   +creditsRefunded+ and +messages+
     #
     # @raise [Sendly::ValidationError] If parameters are invalid
     # @raise [Sendly::InsufficientCreditsError] If account has insufficient credits
@@ -458,7 +478,7 @@ module Sendly
     #       { to: "+15559876543", text: "Hello Bob!" }
     #     ]
     #   )
-    #   puts "Batch #{result['batchId']}: #{result['queued']} queued"
+    #   puts "Batch #{result['batchId']}: #{result['total']} messages, #{result['status']}"
     def send_batch(messages:, from: nil, message_type: nil, metadata: nil, idempotency_key: nil)
       raise ValidationError, "Messages array is required" if messages.nil? || messages.empty?
 
@@ -505,12 +525,12 @@ module Sendly
     #
     # @param limit [Integer] Maximum batches to return (default: 20, max: 100)
     # @param offset [Integer] Number of batches to skip
-    # @param status [String] Filter by status (processing, completed, failed)
+    # @param status [String] Filter by status (processing, completed, partial_failure, failed)
     # @return [Hash] Paginated list of batches
     #
     # @example
     #   batches = client.messages.list_batches(limit: 10)
-    #   batches["data"].each { |b| puts "#{b['batchId']}: #{b['status']}" }
+    #   batches["data"].each { |b| puts "#{b['id']}: #{b['status']}" }
     def list_batches(limit: 20, offset: 0, status: nil)
       params = {
         limit: [limit, 100].min,
@@ -537,7 +557,7 @@ module Sendly
     #       { to: "+15559876543", text: "Hello Bob!" }
     #     ]
     #   )
-    #   puts "Can send: #{preview['canSend']}"
+    #   puts "Sufficient credits: #{preview['hasSufficientCredits']}"
     #   puts "Credits needed: #{preview['creditsNeeded']}"
     def preview_batch(messages:, from: nil, message_type: nil)
       raise ValidationError, "Messages array is required" if messages.nil? || messages.empty?
