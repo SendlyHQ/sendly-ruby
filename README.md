@@ -2066,7 +2066,6 @@ client.enterprise.workspaces.list_keys("ws_xxx")
 # Enterprise-level account, credits and billing
 client.enterprise.get_account
 client.enterprise.credits.get
-client.enterprise.credits.deposit(amount: 100_000, description: "Q4 top-up")
 client.enterprise.settings.get_auto_top_up
 client.enterprise.settings.update_auto_top_up(enabled: true, threshold: 1000, amount: 10_000)
 client.enterprise.billing.get_breakdown(period: "30d")
