@@ -103,6 +103,10 @@ module Sendly
     EVENT_SHORT_CODE_REJECTED            = "short_code.rejected"
     EVENT_SHORT_CODE_FILED               = "short_code.filed"
     EVENT_SHORT_CODE_LIVE                = "short_code.live"
+    EVENT_SHORT_CODE_SUSPENDED           = "short_code.suspended"
+    EVENT_SHORT_CODE_REACTIVATED         = "short_code.reactivated"
+    EVENT_SHORT_CODE_PAYMENT_SUCCEEDED   = "short_code.payment_succeeded"
+    EVENT_SHORT_CODE_PAYMENT_FAILED      = "short_code.payment_failed"
 
     # Source of a list-health event. Frozen enum — new values will be
     # added in minor SDK versions, never removed.
