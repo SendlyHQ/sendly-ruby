@@ -55,6 +55,7 @@ module Sendly
       ring_timeout callee_declined callee_busy caller_cancelled room_closed_unanswered
       agent_left_unanswered agent_caller_never_joined invalid_number destination_rejected
       max_duration credits_exhausted media_aborted peer_connection_lost room_closed agent_left
+      transferred voicemail voicemail_unavailable
       setup_failed agent_dispatch_failed agent_api_unreachable agent_already_ended
       ended
     ].freeze

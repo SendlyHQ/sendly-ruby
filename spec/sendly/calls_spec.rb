@@ -48,6 +48,7 @@ RSpec.describe 'Calls' do
     expect(Sendly::Call::STATUSES).to include('ringing', 'active', 'completed', 'no_answer', 'busy')
     expect(Sendly::Call::HANGUP_CLASSES).to include('normal', 'ring_timeout', 'credits_exhausted',
                                                     'setup_failed', 'ended')
+    expect(Sendly::Call::HANGUP_CLASSES).to include('transferred', 'voicemail', 'voicemail_unavailable')
     expect(Sendly::Call::ERROR_CODES).to include('voice_unavailable', 'agents_unavailable')
     expect(Sendly::Call::ERROR_CODES).to include('voice_not_enabled', 'agent_required', 'e911_required',
                                                  'lines_busy', 'call_not_found', 'live_key_required')
