@@ -62,9 +62,17 @@ module Sendly
     #   { action: { text: ..., postbackData: ..., url: ... } }. Passed
     #   through verbatim, so use the camelCase keys shown. Suggestions have
     #   no SMS form and are dropped on a fallback.
-    # @param fallback_to_sms [Boolean] RCS only: deliver +text+ as plain SMS
+    # @param fallback_to_sms [Boolean] RCS: deliver +text+ as plain SMS
     #   when the recipient can't receive RCS (default true). Pass false to
-    #   fail with 422 +rcs_not_supported_for_recipient+ instead.
+    #   fail with 422 +rcs_not_supported_for_recipient+ instead. WhatsApp:
+    #   default false. With true, a message WhatsApp can't deliver (the
+    #   24-hour window is closed, WhatsApp refuses it, or reports it
+    #   undeliverable later) goes as an SMS from the same number, billed as
+    #   an SMS; +message.fallback+ ({Sendly::WhatsAppSmsFallback}) says what
+    #   happened. The number must already be able to send SMS to the
+    #   recipient (US and Canada), or the API answers 403
+    #   +sms_fallback_unavailable+; marketing and authentication templates,
+    #   and media without a caption, get 422 +sms_fallback_not_supported+.
     # @param idempotency_key [String] Idempotency key for this operation
     #   (1-255 printable ASCII characters). The SDK already generates a key
     #   per logical request automatically, so the server can dedupe the
@@ -130,6 +138,17 @@ module Sendly
     #   puts message.whatsapp.kind   # "template"
     #   puts message.credits_used    # priced by country + category
     #
+    # @example WhatsApp with an SMS fallback
+    #   message = client.messages.send(
+    #     channel: "whatsapp",
+    #     to: "+15551234567",
+    #     from: "+15559876543",
+    #     text: "Your table is ready!",
+    #     fallback_to_sms: true
+    #   )
+    #   puts message.fallback&.status  # "sent" when it went as an SMS
+    #   puts message.fell_back?
+    #
     # @example RCS text with suggested replies and actions
     #   message = client.messages.send(
     #     channel: "rcs",
@@ -189,6 +208,7 @@ module Sendly
         body[:mediaUrls] = media_urls if has_media
         body[:template] = template if template
         body[:metadata] = metadata if metadata
+        body[:fallbackToSms] = fallback_to_sms unless fallback_to_sms.nil?
 
         response = client.post("/messages", body, idempotency_key: idempotency_key)
         return WhatsAppMessage.new(response)

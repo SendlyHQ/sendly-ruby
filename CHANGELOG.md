@@ -1,5 +1,15 @@
 # sendly (Ruby)
 
+## Unreleased
+
+### Minor Changes
+
+- **WhatsApp to SMS fallback.** `messages.send(channel: "whatsapp", fallback_to_sms: true)` sends `fallbackToSms`; it was dropped before. When WhatsApp can't deliver the message (the 24-hour window is closed, WhatsApp refuses it, or reports it undeliverable later), it goes as an SMS from the same number, billed as an SMS. The new `Sendly::WhatsAppSmsFallback` (`channel`, `status`, `reason`, `message_id`, `credits_used`, `error`, `content_dropped`, with `pending?` and `sent?`, and `STATUSES` and `REASONS`) says what happened: it is `WhatsAppMessage#fallback`, and `WhatsAppMessage#fell_back?` is true when the SMS went. When the SMS went in place of the WhatsApp message, `status` is `"failed"` and `fallback.status` is `"sent"`. `Message` gains `fallback` (on a WhatsApp message from `messages.get` or `messages.list`) and `fallback_of` (on the SMS, the id of the WhatsApp message it replaced), and `to_h` includes them when present. The number must already be able to send SMS to the recipient (US and Canada), or the API answers 403 `sms_fallback_unavailable`; marketing and authentication templates, and media without a caption, get 422 `sms_fallback_not_supported`.
+
+### Patch Changes
+
+- **Errors carry the API's error code.** `e.code` is the code the API sent in `error`, such as `"whatsapp_window_closed"`, `"sms_fallback_unavailable"` or `"invalid_api_key"`, on every error class, so refusals with the same status can be told apart. Before, only an unrecognised status read a code, and from a `code` field the API doesn't send, so `e.code` was the class's own code (`"VALIDATION_ERROR"`, `"API_ERROR"` and so on). That code is still used when the body names none (an `error` that is a sentence, or no `error` at all); a body's `code` field is read when `error` isn't a code. Code that compared `e.code` with a class code for an API error should rescue the class instead, or compare with the API's code.
+
 ## 4.3.0
 
 ### Minor Changes

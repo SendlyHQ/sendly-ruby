@@ -1316,6 +1316,25 @@ client.messages.send(
   text: "Here is your receipt",
   media_urls: ["https://acme.example/receipt.pdf"]
 )
+
+# Fall back to SMS from the same number when WhatsApp can't deliver: the
+# window is closed, WhatsApp refuses it, or reports it undeliverable later.
+# The SMS is billed as an SMS. The number must already be able to send SMS to
+# the recipient (US and Canada), or this raises 403 sms_fallback_unavailable;
+# marketing and authentication templates, and media without a caption, raise
+# 422 sms_fallback_not_supported.
+message = client.messages.send(
+  channel: "whatsapp",
+  to: "+15555550100",
+  from: "+15125550123",
+  text: "Your table is ready!",
+  fallback_to_sms: true
+)
+message.fallback.status    # "pending", "sent", "failed", "unavailable" or "skipped"
+message.fallback.reason    # "window_closed", "whatsapp_refused" or "whatsapp_failed"
+message.fell_back?         # true when the SMS went (message.status is then "failed")
+sms = client.messages.get(message.fallback.message_id) if message.fallback.message_id
+sms&.fallback_of           # the WhatsApp message's id
 ```
 
 WhatsApp errors map onto the usual classes:
@@ -1770,12 +1789,12 @@ begin
 rescue Sendly::AuthenticationError => e
   puts "Invalid API key"
 rescue Sendly::RateLimitError => e
-  if e.response_body&.dig("error") == "too_many_failed_key_attempts"
+  if e.code == "too_many_failed_key_attempts"
     # Repeated wrong API keys from this address locked it out for up to
     # 5 minutes. Fix the key; do not retry until the lockout ends.
     puts "Locked out for #{e.retry_after}s: check the API key"
   else
-    puts "Rate limited (#{e.response_body&.dig('error')}), retry after #{e.retry_after} seconds"
+    puts "Rate limited (#{e.code}), retry after #{e.retry_after} seconds"
   end
 rescue Sendly::InsufficientCreditsError => e
   puts "Add more credits to your account"
@@ -1786,17 +1805,18 @@ rescue Sendly::NotFoundError => e
 rescue Sendly::NetworkError => e
   puts "Network error: #{e.message}"
 rescue Sendly::Error => e
-  puts "Error: #{e.message} (#{e.response_body&.dig('error') || e.code})"
+  puts "Error: #{e.message} (#{e.code})"
 end
 ```
 
 Every error is a `Sendly::Error`, which carries `message`, `code`,
 `status_code`, `details` and `response_body` — the parsed JSON body of the
 API's response, or `nil` for an error raised before the request went out.
-The API's own error code is `e.response_body["error"]`; `code` is the SDK's
-name for the class (`"VALIDATION_ERROR"`, `"RATE_LIMIT_EXCEEDED"` and so on),
-except on `APIError`, where it is the body's `"code"` when there is one. Some
-refusals put more in that body than a message: a 409 `agent_in_use` lists the
+`code` is the API's own error code, such as `"whatsapp_window_closed"` or
+`"sms_fallback_unavailable"` (the body's `"error"`), so refusals with the same
+status can be told apart. When the body names no code, `code` is the SDK's
+name for the class (`"VALIDATION_ERROR"`, `"RATE_LIMIT_EXCEEDED"` and so on).
+Some refusals put more in that body than a message: a 409 `agent_in_use` lists the
 numbers under `"numbers"`, a 422 `invalid_address` carries a corrected
 address under `"suggested"`.
 
@@ -1809,7 +1829,7 @@ endpoint.
 | Class | Raised for |
 |-------|-----------|
 | `Sendly::AuthenticationError` | 401, and a missing or malformed API key at construction |
-| `Sendly::ValidationError` | 400 and 422; `field_errors` holds the API's `errors` list. `status_code` reads 400 for both, so tell them apart by `response_body["error"]` |
+| `Sendly::ValidationError` | 400 and 422; `field_errors` holds the API's `errors` list. `status_code` reads 400 for both, so tell them apart by `code` |
 | `Sendly::InsufficientCreditsError` | 402 |
 | `Sendly::NotFoundError` | 404, including a feature that is not enabled for you |
 | `Sendly::RateLimitError` | 429; `retry_after` in seconds when the API sent one |

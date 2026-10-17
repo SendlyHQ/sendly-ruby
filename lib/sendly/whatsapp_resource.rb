@@ -420,6 +420,51 @@ module Sendly
     end
   end
 
+  # The SMS fallback of a WhatsApp message sent with +fallback_to_sms: true+.
+  # +status+ is +"pending"+ until WhatsApp's outcome is known, +"sent"+ when
+  # the SMS went, +"failed"+ when the SMS was refused or credits ran out,
+  # +"unavailable"+ when the SMS could no longer be sent from this number,
+  # and +"skipped"+ when the WhatsApp failure isn't one an SMS fixes.
+  # +reason+ is what made the message fall back (+"window_closed"+,
+  # +"whatsapp_refused"+ or +"whatsapp_failed"+). +message_id+ is the SMS
+  # message's id once it exists, +credits_used+ what the SMS cost, +error+
+  # why the SMS didn't go, in plain English, and +content_dropped+ the
+  # template parts with no SMS form, such as +"quick_replies"+. Values the
+  # API adds later come through unchanged.
+  class WhatsAppSmsFallback
+    attr_reader :channel, :status, :reason, :message_id, :credits_used,
+                :error, :content_dropped
+
+    STATUSES = %w[pending sent failed unavailable skipped].freeze
+    REASONS = %w[window_closed whatsapp_refused whatsapp_failed].freeze
+
+    def initialize(data)
+      @channel = data["channel"] || "sms"
+      @status = data["status"]
+      @reason = data["reason"]
+      @message_id = data["messageId"] || data["message_id"]
+      @credits_used = data["creditsUsed"] || data["credits_used"]
+      @error = data["error"]
+      @content_dropped = data["contentDropped"] || data["content_dropped"]
+    end
+
+    def pending?
+      status == "pending"
+    end
+
+    def sent?
+      status == "sent"
+    end
+
+    def to_h
+      {
+        channel: channel, status: status, reason: reason,
+        message_id: message_id, credits_used: credits_used, error: error,
+        content_dropped: content_dropped
+      }.compact
+    end
+  end
+
   # A sent WhatsApp message. Unlike {Message}, +segments+ is always 1
   # (WhatsApp has no segment concept), +text+ is the caption for a media
   # send (pass it as +text+ with +media_urls+) and nil for template sends
@@ -431,10 +476,14 @@ module Sendly
   # utility price of 12 credits. Templates are priced by category and
   # destination country; countries without a listed price use 33
   # (marketing), 12 (utility) and 12 (authentication) credits. A failed
-  # send gives its slot back.
+  # send gives its slot back. +fallback+ is a {WhatsAppSmsFallback} when the
+  # send asked for +fallback_to_sms+: when WhatsApp couldn't take the
+  # message and it went as an SMS instead, +status+ is +"failed"+ and
+  # +fallback.status+ is +"sent"+ (check with {#fell_back?}).
   class WhatsAppMessage
     attr_reader :id, :channel, :message_format, :to, :from, :text, :status,
-                :segments, :credits_used, :whatsapp, :created_at, :metadata
+                :segments, :credits_used, :whatsapp, :created_at, :metadata,
+                :fallback
 
     def initialize(data)
       @id = data["id"]
@@ -449,6 +498,11 @@ module Sendly
       @whatsapp = data["whatsapp"] ? WhatsAppMessageDetails.new(data["whatsapp"]) : nil
       @created_at = data["createdAt"] || data["created_at"]
       @metadata = data["metadata"]
+      @fallback = data["fallback"].is_a?(Hash) ? WhatsAppSmsFallback.new(data["fallback"]) : nil
+    end
+
+    def fell_back?
+      fallback&.sent? || false
     end
 
     def delivered?
@@ -464,7 +518,7 @@ module Sendly
         id: id, channel: channel, message_format: message_format,
         to: to, from: from, text: text, status: status, segments: segments,
         credits_used: credits_used, whatsapp: whatsapp&.to_h,
-        created_at: created_at, metadata: metadata
+        created_at: created_at, metadata: metadata, fallback: fallback&.to_h
       }.compact
     end
   end

@@ -3,7 +3,10 @@
 module Sendly
   # Base error class for all Sendly errors
   class Error < StandardError
-    # @return [String, nil] Error code from the API
+    # @return [String, nil] The API's error code, such as
+    #   +"whatsapp_window_closed"+ or +"sms_fallback_unavailable"+, for an
+    #   error built from an API response that names one. Otherwise the
+    #   class's own code, such as +"VALIDATION_ERROR"+.
     attr_reader :code
 
     # @return [Hash, nil] Additional error details
@@ -40,8 +43,8 @@ module Sendly
 
   # Raised when the API key is invalid or missing
   class AuthenticationError < Error
-    def initialize(message = "Invalid or missing API key")
-      super(message, code: "AUTHENTICATION_ERROR", status_code: 401)
+    def initialize(message = "Invalid or missing API key", code: nil)
+      super(message, code: code || "AUTHENTICATION_ERROR", status_code: 401)
     end
   end
 
@@ -50,16 +53,16 @@ module Sendly
     # @return [Integer, nil] Seconds to wait before retrying
     attr_reader :retry_after
 
-    def initialize(message = "Rate limit exceeded", retry_after: nil)
+    def initialize(message = "Rate limit exceeded", retry_after: nil, code: nil)
       @retry_after = retry_after
-      super(message, code: "RATE_LIMIT_EXCEEDED", status_code: 429)
+      super(message, code: code || "RATE_LIMIT_EXCEEDED", status_code: 429)
     end
   end
 
   # Raised when the account has insufficient credits
   class InsufficientCreditsError < Error
-    def initialize(message = "Insufficient credits")
-      super(message, code: "INSUFFICIENT_CREDITS", status_code: 402)
+    def initialize(message = "Insufficient credits", code: nil)
+      super(message, code: code || "INSUFFICIENT_CREDITS", status_code: 402)
     end
   end
 
@@ -70,16 +73,16 @@ module Sendly
     #   e.g. +[{ "path" => "brand.ein", "message" => "Enter a 9-digit EIN" }]+
     attr_reader :field_errors
 
-    def initialize(message = "Validation failed", field_errors: nil, details: nil)
+    def initialize(message = "Validation failed", field_errors: nil, details: nil, code: nil)
       @field_errors = field_errors
-      super(message, code: "VALIDATION_ERROR", details: details, status_code: 400)
+      super(message, code: code || "VALIDATION_ERROR", details: details, status_code: 400)
     end
   end
 
   # Raised when the requested resource is not found
   class NotFoundError < Error
-    def initialize(message = "Resource not found")
-      super(message, code: "NOT_FOUND", status_code: 404)
+    def initialize(message = "Resource not found", code: nil)
+      super(message, code: code || "NOT_FOUND", status_code: 404)
     end
   end
 
@@ -107,37 +110,49 @@ module Sendly
 
   # Raised for server errors (5xx)
   class ServerError < Error
-    def initialize(message = "Server error occurred", status_code: 500)
-      super(message, code: "SERVER_ERROR", status_code: status_code)
+    def initialize(message = "Server error occurred", status_code: 500, code: nil)
+      super(message, code: code || "SERVER_ERROR", status_code: status_code)
     end
   end
 
   # Convert API response to appropriate error
   class ErrorFactory
+    API_ERROR_CODE = /\A[a-z][a-z0-9_]*\z/
+    private_constant :API_ERROR_CODE
+
     def self.from_response(status, body, retry_after_header: nil)
       message = body["message"] || body["error"] || "Unknown error"
-      code = body["code"]
+      code = api_error_code(body)
       details = body["details"]
 
       error = case status
               when 400, 422
-                ValidationError.new(message, details: details, field_errors: body["errors"])
+                ValidationError.new(message, details: details, field_errors: body["errors"], code: code)
               when 401
-                AuthenticationError.new(message)
+                AuthenticationError.new(message, code: code)
               when 402
-                InsufficientCreditsError.new(message)
+                InsufficientCreditsError.new(message, code: code)
               when 404
-                NotFoundError.new(message)
+                NotFoundError.new(message, code: code)
               when 429
                 retry_after = parse_retry_after(retry_after_header) || body["retry_after"] || body["retryAfter"]
-                RateLimitError.new(message, retry_after: retry_after)
+                RateLimitError.new(message, retry_after: retry_after, code: code)
               when 500..599
-                ServerError.new(message, status_code: status)
+                ServerError.new(message, status_code: status, code: code)
               else
                 APIError.new(message, status_code: status, code: code, details: details)
               end
       error.with_response_body(body)
     end
+
+    def self.api_error_code(body)
+      error = body["error"]
+      return error.strip if error.is_a?(String) && error.strip.match?(API_ERROR_CODE)
+
+      code = body["code"]
+      code.is_a?(String) && !code.strip.empty? ? code : nil
+    end
+    private_class_method :api_error_code
 
     def self.parse_retry_after(value)
       text = value.to_s.strip

@@ -665,4 +665,223 @@ RSpec.describe Sendly::Messages, 'WhatsApp sends' do
       expect(message).to be_a(Sendly::Message)
     end
   end
+
+  describe '#send with channel: whatsapp and fallback_to_sms' do
+    def fallback_body
+      {
+        'channel' => 'sms',
+        'status' => 'sent',
+        'reason' => 'window_closed',
+        'messageId' => 'msg_sms456',
+        'creditsUsed' => 2,
+        'contentDropped' => ['quick_replies']
+      }
+    end
+
+    it 'sends fallbackToSms in camelCase' do
+      stub = stub_request(:post, "#{base_url}/messages")
+        .with(
+          body: {
+            channel: 'whatsapp',
+            to: '+15551234567',
+            from: '+15559876543',
+            text: 'Your table is ready!',
+            fallbackToSms: true
+          }.to_json
+        )
+        .to_return(status: 200, body: whatsapp_message_response.to_json)
+
+      messages.send(
+        channel: 'whatsapp',
+        to: '+15551234567',
+        from: '+15559876543',
+        text: 'Your table is ready!',
+        fallback_to_sms: true
+      )
+
+      expect(stub).to have_been_requested
+    end
+
+    it 'sends fallbackToSms false when asked' do
+      stub = stub_request(:post, "#{base_url}/messages")
+        .with { |req| JSON.parse(req.body)['fallbackToSms'] == false }
+        .to_return(status: 200, body: whatsapp_message_response.to_json)
+
+      messages.send(
+        channel: 'whatsapp',
+        to: '+15551234567',
+        from: '+15559876543',
+        text: 'Your table is ready!',
+        fallback_to_sms: false
+      )
+
+      expect(stub).to have_been_requested
+    end
+
+    it 'leaves fallbackToSms out when not given' do
+      stub = stub_request(:post, "#{base_url}/messages")
+        .with { |req| !JSON.parse(req.body).key?('fallbackToSms') }
+        .to_return(status: 200, body: whatsapp_message_response.to_json)
+
+      messages.send(channel: 'whatsapp', to: '+15551234567', from: '+15559876543', text: 'Hi')
+
+      expect(stub).to have_been_requested
+    end
+
+    it 'exposes the fallback on the returned WhatsAppMessage' do
+      stub_request(:post, "#{base_url}/messages")
+        .to_return(status: 200, body: whatsapp_message_response(
+          'status' => 'failed',
+          'fallback' => fallback_body
+        ).to_json)
+
+      message = messages.send(
+        channel: 'whatsapp',
+        to: '+15551234567',
+        from: '+15559876543',
+        text: 'Your table is ready!',
+        fallback_to_sms: true
+      )
+
+      expect(message.status).to eq('failed')
+      expect(message.fallback).to be_a(Sendly::WhatsAppSmsFallback)
+      expect(message.fallback.channel).to eq('sms')
+      expect(message.fallback.status).to eq('sent')
+      expect(message.fallback.reason).to eq('window_closed')
+      expect(message.fallback.message_id).to eq('msg_sms456')
+      expect(message.fallback.credits_used).to eq(2)
+      expect(message.fallback.error).to be_nil
+      expect(message.fallback.content_dropped).to eq(['quick_replies'])
+      expect(message.fallback).to be_sent
+      expect(message).to be_fell_back
+      expect(message.to_h[:fallback]).to eq(
+        channel: 'sms', status: 'sent', reason: 'window_closed',
+        message_id: 'msg_sms456', credits_used: 2, content_dropped: ['quick_replies']
+      )
+    end
+
+    it 'reports a pending fallback without saying it fell back' do
+      stub_request(:post, "#{base_url}/messages")
+        .to_return(status: 200, body: whatsapp_message_response(
+          'status' => 'sent',
+          'fallback' => { 'channel' => 'sms', 'status' => 'pending' }
+        ).to_json)
+
+      message = messages.send(channel: 'whatsapp', to: '+15551234567', from: '+15559876543',
+                              text: 'Hi', fallback_to_sms: true)
+
+      expect(message.fallback).to be_pending
+      expect(message).not_to be_fell_back
+    end
+
+    it 'carries the error of a fallback that did not go' do
+      stub_request(:post, "#{base_url}/messages")
+        .to_return(status: 200, body: whatsapp_message_response(
+          'status' => 'failed',
+          'fallback' => { 'channel' => 'sms', 'status' => 'failed', 'reason' => 'whatsapp_failed',
+                          'error' => 'Insufficient credits for the SMS' }
+        ).to_json)
+
+      message = messages.send(channel: 'whatsapp', to: '+15551234567', from: '+15559876543',
+                              text: 'Hi', fallback_to_sms: true)
+
+      expect(message.fallback.status).to eq('failed')
+      expect(message.fallback.error).to eq('Insufficient credits for the SMS')
+      expect(message).not_to be_fell_back
+    end
+
+    it 'has no fallback when the response has none' do
+      stub_request(:post, "#{base_url}/messages")
+        .to_return(status: 200, body: whatsapp_message_response.to_json)
+
+      message = messages.send(channel: 'whatsapp', to: '+15551234567', from: '+15559876543', text: 'Hi')
+
+      expect(message.fallback).to be_nil
+      expect(message).not_to be_fell_back
+      expect(message.to_h).not_to have_key(:fallback)
+    end
+
+    it 'raises with the API code when the number cannot send the SMS fallback' do
+      stub_request(:post, "#{base_url}/messages")
+        .to_return(status: 403, body: {
+          'error' => 'sms_fallback_unavailable',
+          'message' => 'This number cannot send SMS to the recipient.'
+        }.to_json)
+
+      expect do
+        messages.send(channel: 'whatsapp', to: '+15551234567', from: '+15559876543',
+                      text: 'Hi', fallback_to_sms: true)
+      end.to raise_error(Sendly::APIError) do |e|
+        expect(e.code).to eq('sms_fallback_unavailable')
+        expect(e.status_code).to eq(403)
+      end
+    end
+
+    it 'raises with the API code for a closed window, carrying the fallback in the body' do
+      stub_request(:post, "#{base_url}/messages")
+        .to_return(status: 422, body: {
+          'error' => 'whatsapp_window_closed',
+          'message' => 'The 24-hour window is closed.',
+          'id' => 'msg_wa123',
+          'fallback' => { 'channel' => 'sms', 'status' => 'unavailable', 'reason' => 'window_closed' }
+        }.to_json)
+
+      expect do
+        messages.send(channel: 'whatsapp', to: '+15551234567', from: '+15559876543', text: 'Hi')
+      end.to raise_error(Sendly::ValidationError) do |e|
+        expect(e.code).to eq('whatsapp_window_closed')
+        expect(e.response_body.dig('fallback', 'status')).to eq('unavailable')
+      end
+    end
+
+    it 'raises with the API code when the content has no SMS form' do
+      stub_request(:post, "#{base_url}/messages")
+        .to_return(status: 422, body: {
+          'error' => 'sms_fallback_not_supported',
+          'message' => 'Marketing templates cannot fall back to SMS.'
+        }.to_json)
+
+      expect do
+        messages.send(channel: 'whatsapp', to: '+15551234567', from: '+15559876543',
+                      template: { name: 'promo', language: 'en_US' }, fallback_to_sms: true)
+      end.to raise_error(Sendly::ValidationError) { |e| expect(e.code).to eq('sms_fallback_not_supported') }
+    end
+  end
+
+  describe 'fallback fields on a stored Message' do
+    it 'exposes the fallback of a WhatsApp message from messages.get' do
+      stub_request(:get, "#{base_url}/messages/msg_wa123")
+        .to_return(status: 200, body: message_response(
+          'id' => 'msg_wa123',
+          'status' => 'failed',
+          'messageFormat' => 'whatsapp',
+          'message_format' => 'whatsapp',
+          'fallback' => { 'channel' => 'sms', 'status' => 'sent', 'reason' => 'whatsapp_refused',
+                          'messageId' => 'msg_sms456', 'creditsUsed' => 2 }
+        ).to_json)
+
+      message = messages.get('msg_wa123')
+
+      expect(message.fallback).to be_a(Sendly::WhatsAppSmsFallback)
+      expect(message.fallback.reason).to eq('whatsapp_refused')
+      expect(message.fallback.message_id).to eq('msg_sms456')
+      expect(message.fallback_of).to be_nil
+      expect(message.to_h[:fallback]).to include(status: 'sent', message_id: 'msg_sms456')
+    end
+
+    it 'exposes fallback_of on the SMS that replaced a WhatsApp message' do
+      stub_request(:get, "#{base_url}/messages/msg_sms456")
+        .to_return(status: 200, body: message_response(
+          'id' => 'msg_sms456',
+          'fallbackOf' => 'msg_wa123'
+        ).to_json)
+
+      message = messages.get('msg_sms456')
+
+      expect(message.fallback_of).to eq('msg_wa123')
+      expect(message.fallback).to be_nil
+      expect(message.to_h[:fallback_of]).to eq('msg_wa123')
+      expect(message.to_h).not_to have_key(:fallback)
+    end
+  end
 end

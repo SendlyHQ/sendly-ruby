@@ -474,6 +474,66 @@ RSpec.describe 'Sendly Error Classes' do
         end
       end
 
+      context 'API error codes' do
+        it 'carries the API code from the error field on every status' do
+          {
+            400 => [Sendly::ValidationError, 'invalid_request'],
+            401 => [Sendly::AuthenticationError, 'invalid_api_key'],
+            402 => [Sendly::InsufficientCreditsError, 'insufficient_credits'],
+            403 => [Sendly::APIError, 'sms_fallback_unavailable'],
+            404 => [Sendly::NotFoundError, 'not_found'],
+            409 => [Sendly::APIError, 'whatsapp_send_unconfirmed'],
+            422 => [Sendly::ValidationError, 'whatsapp_window_closed'],
+            429 => [Sendly::RateLimitError, 'too_many_failed_key_attempts'],
+            502 => [Sendly::ServerError, 'whatsapp_send_failed']
+          }.each do |status, (klass, code)|
+            error = Sendly::ErrorFactory.from_response(status, { 'error' => code, 'message' => 'Refused' })
+            expect(error).to be_a(klass)
+            expect(error.code).to eq(code)
+            expect(error.message).to eq('Refused')
+          end
+        end
+
+        it 'tells two refusals with the same status apart' do
+          unavailable = Sendly::ErrorFactory.from_response(403, { 'error' => 'sms_fallback_unavailable' })
+          not_enabled = Sendly::ErrorFactory.from_response(403, { 'error' => 'whatsapp_not_enabled' })
+          expect(unavailable.code).to eq('sms_fallback_unavailable')
+          expect(not_enabled.code).to eq('whatsapp_not_enabled')
+        end
+
+        it 'prefers the error field over a code field' do
+          body = { 'error' => 'account_under_review', 'code' => 'ACCOUNT_UNDER_REVIEW', 'message' => 'Under review' }
+          error = Sendly::ErrorFactory.from_response(403, body)
+          expect(error.code).to eq('account_under_review')
+        end
+
+        it 'uses the code field when the error field is a sentence' do
+          body = { 'error' => 'Something went wrong', 'code' => 'CUSTOM_CODE' }
+          error = Sendly::ErrorFactory.from_response(400, body)
+          expect(error.code).to eq('CUSTOM_CODE')
+          expect(error.message).to eq('Something went wrong')
+        end
+
+        it "keeps the class's own code when the body names none" do
+          expect(Sendly::ErrorFactory.from_response(400, { 'error' => 'From error field' }).code)
+            .to eq('VALIDATION_ERROR')
+          expect(Sendly::ErrorFactory.from_response(401, { 'error' => 'Unauthorized' }).code)
+            .to eq('AUTHENTICATION_ERROR')
+          expect(Sendly::ErrorFactory.from_response(402, {}).code).to eq('INSUFFICIENT_CREDITS')
+          expect(Sendly::ErrorFactory.from_response(404, {}).code).to eq('NOT_FOUND')
+          expect(Sendly::ErrorFactory.from_response(429, {}).code).to eq('RATE_LIMIT_EXCEEDED')
+          expect(Sendly::ErrorFactory.from_response(500, {}).code).to eq('SERVER_ERROR')
+          expect(Sendly::ErrorFactory.from_response(403, {}).code).to eq('API_ERROR')
+        end
+
+        it 'keeps retry_after alongside the code on a 429' do
+          body = { 'error' => 'whatsapp_verification_resend_too_soon', 'retryAfter' => 30 }
+          error = Sendly::ErrorFactory.from_response(429, body)
+          expect(error.code).to eq('whatsapp_verification_resend_too_soon')
+          expect(error.retry_after).to eq(30)
+        end
+      end
+
       context 'Edge cases' do
         it 'handles empty response body' do
           error = Sendly::ErrorFactory.from_response(500, {})

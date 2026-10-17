@@ -69,6 +69,14 @@ module Sendly
     # @return [String] "sms", "mms", "rcs" or "whatsapp"; "sms" when the response does not say
     attr_reader :message_format
 
+    # @return [Sendly::WhatsAppSmsFallback, nil] On a WhatsApp message sent
+    #   with +fallback_to_sms+, what happened to its SMS fallback
+    attr_reader :fallback
+
+    # @return [String, nil] On an SMS fallback, the id of the WhatsApp
+    #   message it replaced
+    attr_reader :fallback_of
+
     # Message status constants (sending removed - doesn't exist in database)
     STATUSES = %w[queued sent delivered failed bounced retrying].freeze
 
@@ -98,6 +106,8 @@ module Sendly
       @ai_metadata = data["aiMetadata"]
       @media_urls = data["mediaUrls"] || data["media_urls"] || []
       @message_format = data["messageFormat"] || data["message_format"] || "sms"
+      @fallback = data["fallback"].is_a?(Hash) ? WhatsAppSmsFallback.new(data["fallback"]) : nil
+      @fallback_of = data["fallbackOf"] || data["fallback_of"]
     end
 
     # Check if message was delivered
@@ -143,7 +153,9 @@ module Sendly
         metadata: metadata,
         ai_metadata: ai_metadata,
         media_urls: media_urls,
-        message_format: message_format
+        message_format: message_format,
+        fallback: fallback&.to_h,
+        fallback_of: fallback_of
       }.compact
     end
 
