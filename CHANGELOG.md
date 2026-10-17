@@ -1,6 +1,6 @@
 # sendly (Ruby)
 
-## Unreleased
+## 4.4.0
 
 ### Minor Changes
 
