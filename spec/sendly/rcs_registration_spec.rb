@@ -441,7 +441,7 @@ RSpec.describe 'RCS registration' do
 
       expect { rcs.agents.create(brand_id: 'rcb_1', basics: { logo_url: 'data:image/png;base64,AAAA' }) }
         .to raise_error(Sendly::ValidationError) do |e|
-          expect(e.status_code).to eq(400)
+          expect(e.status_code).to eq(422)
           expect(e.message).to match(/public https/)
           expect(e.field_errors).to eq([{ 'path' => 'basics.logoUrl', 'message' => 'Must be a public https:// URL' }])
         end

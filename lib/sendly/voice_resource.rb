@@ -402,7 +402,7 @@ module Sendly
     # @raise [Sendly::NotFoundError] HTTP 404 +number_not_found+ / +agent_not_found+
     # @raise [Sendly::APIError] HTTP 409 +agent_disabled+ (the agent is
     #   switched off), 403 +forbidden+ / +live_key_required+
-    # @raise [Sendly::ServerError] HTTP 502 +voice_attach_failed+ (voice could
+    # @raise [Sendly::ServerError] HTTP 503 +voice_attach_failed+ (voice could
     #   not be switched on; try again) or 503 +voice_unavailable+, after the
     #   client's automatic retries. Either can follow a mode alone on a number
     #   whose voice is off.
@@ -454,7 +454,7 @@ module Sendly
     #   422 +invalid_address+ when the address could not be validated, with a
     #   corrected address (or +nil+) in +e.response_body["suggested"]+
     # @raise [Sendly::NotFoundError] HTTP 404 +number_not_found+
-    # @raise [Sendly::ServerError] HTTP 502 +carrier_refused+ when the
+    # @raise [Sendly::ServerError] HTTP 503 +carrier_refused+ when the
     #   registration was refused, raised after the client has already retried
     #   the 5xx on its own. When the message says the number couldn't be
     #   found for emergency registration, retrying won't help: contact
@@ -691,7 +691,7 @@ module Sendly
   # +agent_disabled+ / +agent_limit+ / +agent_in_use+ (409) and +forbidden+
   # / +live_key_required+ / +insufficient_permissions+ (403); and
   # {Sendly::ServerError} (not an +APIError+) for +voice_attach_failed+ /
-  # +carrier_refused+ (502), +voice_unavailable+ (503) and
+  # +carrier_refused+ / +voice_unavailable+ (503) and
   # +voice_internal_error+ (500). Every API error keeps the parsed body on
   # {Sendly::Error#response_body}. The full list is {Call::ERROR_CODES}.
   #

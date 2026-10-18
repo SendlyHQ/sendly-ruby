@@ -163,6 +163,11 @@ RSpec.describe 'Sendly Error Classes' do
       expect(error.status_code).to eq(400)
     end
 
+    it 'accepts another status code' do
+      error = Sendly::ValidationError.new('Unprocessable', status_code: 422)
+      expect(error.status_code).to eq(422)
+    end
+
     it 'stores field_errors' do
       field_errors = { phone: 'Invalid format', text: 'Too long' }
       error = Sendly::ValidationError.new('Validation failed', field_errors: field_errors)
@@ -326,6 +331,7 @@ RSpec.describe 'Sendly Error Classes' do
           error = Sendly::ErrorFactory.from_response(400, { 'message' => 'Invalid input' })
           expect(error).to be_a(Sendly::ValidationError)
           expect(error.message).to eq('Invalid input')
+          expect(error.status_code).to eq(400)
         end
 
         it 'includes details' do
@@ -340,6 +346,12 @@ RSpec.describe 'Sendly Error Classes' do
           error = Sendly::ErrorFactory.from_response(422, { 'message' => 'Unprocessable entity' })
           expect(error).to be_a(Sendly::ValidationError)
           expect(error.message).to eq('Unprocessable entity')
+        end
+
+        it 'reports the real HTTP status, not 400' do
+          error = Sendly::ErrorFactory.from_response(422, { 'error' => 'whatsapp_window_closed', 'message' => 'Closed' })
+          expect(error.status_code).to eq(422)
+          expect(error.code).to eq('whatsapp_window_closed')
         end
       end
 

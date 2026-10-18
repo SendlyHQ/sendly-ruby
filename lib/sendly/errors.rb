@@ -73,9 +73,9 @@ module Sendly
     #   e.g. +[{ "path" => "brand.ein", "message" => "Enter a 9-digit EIN" }]+
     attr_reader :field_errors
 
-    def initialize(message = "Validation failed", field_errors: nil, details: nil, code: nil)
+    def initialize(message = "Validation failed", field_errors: nil, details: nil, code: nil, status_code: 400)
       @field_errors = field_errors
-      super(message, code: code || "VALIDATION_ERROR", details: details, status_code: 400)
+      super(message, code: code || "VALIDATION_ERROR", details: details, status_code: status_code)
     end
   end
 
@@ -127,7 +127,7 @@ module Sendly
 
       error = case status
               when 400, 422
-                ValidationError.new(message, details: details, field_errors: body["errors"], code: code)
+                ValidationError.new(message, details: details, field_errors: body["errors"], code: code, status_code: status)
               when 401
                 AuthenticationError.new(message, code: code)
               when 402

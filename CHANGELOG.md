@@ -1,5 +1,12 @@
 # sendly (Ruby)
 
+## 4.5.0
+
+### Patch Changes
+
+- **`Sendly::ValidationError#status_code` is the response's real status.** It was always 400, so a 422 (such as `whatsapp_window_closed` or `sms_fallback_not_supported`) reported 400. Code that compared `status_code` with 400 to spot a validation error should check the class (or `code`) instead. `ValidationError.new` takes an optional `status_code:`, 400 by default.
+- Docs give 503, the status the API sends, instead of 502 for the WhatsApp and voice errors raised when WhatsApp or the carrier couldn't be reached: `whatsapp_send_failed` when the message never reached WhatsApp (not sent, and safe to send again with the same idempotency key), the WhatsApp signup, profile, conversational-components and calling errors, `voice_attach_failed` and `carrier_refused`. The API answers every 502 as a 503 with a `Sendly-Upstream-Status: 502` header. Nothing changes at runtime.
+
 ## 4.4.0
 
 ### Minor Changes

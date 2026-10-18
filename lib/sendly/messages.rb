@@ -86,7 +86,7 @@ module Sendly
     #   WhatsApp the 422 +whatsapp_send_failed+ when WhatsApp refused the
     #   message (final, not retried, not charged; cached under the
     #   idempotency key and replayed for 24 hours)
-    # @raise [Sendly::ServerError] On WhatsApp, the 502 +whatsapp_send_failed+:
+    # @raise [Sendly::ServerError] On WhatsApp, the 503 +whatsapp_send_failed+:
     #   the message provably never reached the carrier, so it was not sent
     #   and is safe to send again. It isn't charged and is never cached, so
     #   the client retries it like any 5xx first under the same idempotency
