@@ -1153,11 +1153,13 @@ puts status.disabled?
 
 Connect a number you own to WhatsApp, create Meta-reviewed message
 templates, and send via `client.messages.send(channel: "whatsapp", ...)`.
-Connecting is free (no monthly fee either). The first number always
-ends with a human step: the signup returns a connect URL a person must open in
-a browser and log in with Facebook to link their WhatsApp Business Account.
-More numbers can then be added to that account with a 6-digit code Meta sends
-to the number, with no Facebook step (also free).
+Connecting costs a one-time $9.99 fee per number (no monthly fee), charged to
+your card when you start connecting it, refunded automatically if the
+connection fails, and not refundable once the number is connected. The first
+number always ends with a human step: the signup returns a connect URL a person
+must open in a browser and log in with Facebook to link their WhatsApp Business
+Account. More numbers can then be added to that account with a 6-digit code Meta sends
+to the number, with no Facebook step (same $9.99 fee, refunded if it fails).
 
 Sends go through `messages.send(channel: "whatsapp")` and need `sms:send`,
 not `whatsapp:write`. Reads (`signup.get`, templates, the window, senders and
@@ -1191,14 +1193,16 @@ gives its slot back. Note: Meta
 has paused marketing template delivery to US (+1) numbers.
 
 ```ruby
-# 1. Connect a number (free; a human must open the connect URL)
+# 1. Connect a number ($9.99 one-time; a human must open the connect URL)
 signup = client.whatsapp.signup.create(phone_number: "+15125550123")
 puts "Have your user open: #{signup.connect_url}"
 
 # 2. Poll until active. After the Facebook step the signup is "registering"
 # while WhatsApp activates the number. Activation usually takes a few minutes
 # but can take hours. If it hasn't finished about 6 hours after the session
-# began, the session fails with registration_timeout.
+# began, the session fails with registration_timeout and the fee is refunded.
+# If the connection fails, the $9.99 fee is refunded automatically; once a
+# number has connected, a later disconnect gets nothing back.
 status = client.whatsapp.signup.get(signup.id)
 puts status.failure_reasons if status.failed?  # e.g. ["waba_mismatch"]
 
@@ -1322,7 +1326,7 @@ WhatsApp errors map onto the usual classes:
   while WhatsApp connections are unavailable. Only signup returns it; no send
   does. Nothing is charged, the response carries a `Retry-After: 3600` header,
   and `e.response_body["retryAfter"]` (3600) says how many seconds to wait; the client
-  retries it like any 5xx before raising. After 5 failed signups in
+  retries it like any 5xx before raising. After 5 failed, charged signups in
   24 hours it raises `Sendly::RateLimitError` for 429
   `whatsapp_signup_limit_reached`, which is not retried: try again the next
   day.
@@ -1366,18 +1370,17 @@ WhatsApp errors map onto the usual classes:
   `whatsapp_signup_in_progress` and `whatsapp_already_enabled`, and
   `Sendly::ServerError` for 503 `whatsapp_verification_start_failed` (WhatsApp
   couldn't start verifying the number; start again). Either failure fails the
-  session. With `business_account_id:` the client never retries a 5xx, a
-  timeout or a dropped connection, because each retry would start a new
-  session. A
-  Facebook signup for a number
+  session and refunds its fee. With `business_account_id:` the client never
+  retries a 5xx, a timeout or a dropped connection, because each retry would
+  start a new charged session. A Facebook signup for a number
   that is being added by code gets 409 `whatsapp_verification_in_progress`,
   with that session's id in `e.response_body["id"]`.
 - `signup.verify` raises `Sendly::ValidationError` for 400
   `invalid_verification_code` (not 6 digits) and 422
   `whatsapp_verification_code_invalid` (a wrong code, with
   `e.response_body["attemptsRemaining"]`); `Sendly::APIError` (409) for
-  `whatsapp_verification_failed` (after 5 wrong codes the session fails),
-  `whatsapp_verification_busy` (try again) and
+  `whatsapp_verification_failed` (after 5 wrong codes the session fails and
+  the fee is refunded), `whatsapp_verification_busy` (try again) and
   `signup_not_active`; and `Sendly::ServerError` for 503
   `whatsapp_verification_unavailable` (the attempt isn't counted) and
   `whatsapp_activation_pending` (the code was accepted but connecting didn't

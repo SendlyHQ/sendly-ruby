@@ -205,7 +205,7 @@ RSpec.describe Sendly::WhatsAppResource, 'extras' do
     it 'raises ServerError for a 502 whatsapp_verification_start_failed at once, without starting another charged session' do
       stub = stub_request(:post, "#{base_url}/whatsapp/signup")
         .to_return(json(502, 'error' => 'whatsapp_verification_start_failed',
-                             'message' => "WhatsApp couldn't start verifying this number. Please try again shortly."))
+                             'message' => "WhatsApp couldn't start verifying this number. Any setup fee is refunded automatically. Please try again shortly."))
 
       expect { whatsapp.signup.create(phone_number: phone, business_account_id: waba_id) }
         .to raise_error(Sendly::ServerError) { |e|
@@ -218,7 +218,7 @@ RSpec.describe Sendly::WhatsAppResource, 'extras' do
     it 'raises any other 5xx at once too, without retrying' do
       stub = stub_request(:post, "#{base_url}/whatsapp/signup")
         .to_return(json(500, 'error' => 'internal_error',
-                             'message' => 'Something went wrong asking WhatsApp for the code. Please try again.'))
+                             'message' => 'Something went wrong asking WhatsApp for the code. Any setup fee is refunded automatically. Please try again.'))
 
       expect { whatsapp.signup.create(phone_number: phone, business_account_id: waba_id) }
         .to raise_error(Sendly::ServerError) { |e| expect(e.status_code).to eq(500) }

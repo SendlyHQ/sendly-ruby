@@ -63,8 +63,8 @@ module Sendly
   # The status of a WhatsApp signup. +status+ is +"initiated"+,
   # +"registering"+ (WhatsApp is activating the number; activation usually
   # takes a few minutes but can take hours, and a session that hasn't
-  # finished about 6 hours after it began fails with +registration_timeout+),
-  # +"verifying"+ (a number being added to an
+  # finished about 6 hours after it began fails with +registration_timeout+
+  # and the fee is refunded), +"verifying"+ (a number being added to an
   # already-connected account, waiting for its code), +"active"+ or
   # +"failed"+. The API does not send +"expired"+,
   # so {#expired?} is never true; it stays for compatibility.
@@ -72,8 +72,7 @@ module Sendly
   # +"active"+ (from the start for a number added by code); it is nil while
   # +"initiated"+ or +"registering"+ and after a failure.
   # +failure_reasons+ is set when the status is +"failed"+, with one code:
-  # +setup_fee_payment_failed+ (the connection couldn't be started),
-  # +signup_abandoned+, +meta_exchange_failed+,
+  # +setup_fee_payment_failed+, +signup_abandoned+, +meta_exchange_failed+,
   # +registration_failed+, +waba_already_connected+, +waba_mismatch+ (the
   # WhatsApp Business Account chosen in the Facebook step doesn't hold the
   # verified number), +registration_timeout+ (activation hadn't finished
@@ -81,6 +80,7 @@ module Sendly
   # +verification_start_failed+ (WhatsApp couldn't start verifying an added
   # number), +verification_failed+ (too many wrong codes) or
   # +verification_expired+ (a verifying session left untouched for an hour).
+  # If the connection fails, the $9.99 fee is refunded automatically.
   #
   # While the status is +"verifying"+, +verification_method+ (+"sms"+ or
   # +"voice"+) and +verification_attempts_remaining+ are set, and on
@@ -533,31 +533,35 @@ module Sendly
 
     # Start connecting a number to WhatsApp.
     #
-    # Connecting a number is free (no setup or monthly fee). Returns a
+    # Charges a one-time $9.99 connection fee per number (no monthly fee) to
+    # your card when the connection starts, and returns a
     # +connect_url+. Completing the connection requires a human: hand the
     # URL to your user — they open it in a browser and log in with Facebook
     # to link their WhatsApp Business Account. Then poll {#get} until the
     # status is +"active"+.
     #
     # Calling again for a number with an in-flight signup returns the
-    # existing signup (same +connect_url+). Requires
+    # existing signup (same +connect_url+) without charging again. Requires
     # a live API key with the +whatsapp:write+ scope (a test key gets 403
     # +whatsapp_requires_live_key+) and, in a team workspace, an owner or
     # admin (+settings:write+). After the Facebook step the signup stays
     # +"registering"+ while WhatsApp activates the number. Activation usually
     # takes a few minutes but can take hours. If it hasn't finished about 6
     # hours after the session began, the session fails with
-    # +registration_timeout+.
+    # +registration_timeout+ and the fee is refunded. If the connection
+    # fails, the $9.99 fee is refunded automatically; once the number has
+    # connected it is not refundable, and a later disconnect gets nothing
+    # back.
     #
     # To add a number to a WhatsApp Business Account this workspace has
     # already connected, pass its +business_account_id+ (as shown on
     # {WhatsAppSender#business_account_id}). There is no Facebook step and no
-    # +connect_url+: it is free too, Meta sends the number a
+    # +connect_url+: the same $9.99 fee is charged, Meta sends the number a
     # 6-digit code by text or voice call, and the session is +"verifying"+
     # until you submit the code with {#verify}. Calling again for a number
-    # that is verifying returns the same session without sending a second
-    # code; a verifying session older than 3 hours is expired and a new one
-    # is started.
+    # that is verifying returns the same session without charging again or
+    # sending a second code; a verifying session older than 3 hours is
+    # expired (and refunded) and a new one is started.
     #
     # @param phone_number [String] The number to connect, in E.164 format.
     #   Must be an active number in your workspace.
@@ -572,12 +576,12 @@ module Sendly
     #   +business_account_id+.
     # @return [WhatsAppSignupSession]
     # @raise [Sendly::ServerError] +whatsapp_unavailable+ (503) while
-    #   WhatsApp connections are unavailable. Only
+    #   WhatsApp connections are unavailable. Nothing is charged. Only
     #   signup returns it, with +retryAfter+ 3600 in the body
     #   (+e.response_body["retryAfter"]+) and a +Retry-After: 3600+ header.
     #   The client retries it like any 5xx before raising.
     # @raise [Sendly::RateLimitError] +whatsapp_signup_limit_reached+ (429)
-    #   after 5 failed signups (or 20 cancelled) in 24 hours. Not retried;
+    #   after 5 failed, charged signups (or 20 cancelled) in 24 hours. Not retried;
     #   try again the next day.
     # @raise [Sendly::NotFoundError] +whatsapp_business_account_not_found+
     #   (404) when +business_account_id+ isn't connected in this workspace
@@ -585,7 +589,7 @@ module Sendly
     # @raise [Sendly::ValidationError] +display_name_required+ (400) when no
     #   display name is given and the account has none to reuse, and
     #   +whatsapp_verification_start_failed+ (422) when WhatsApp refused to
-    #   verify the number: final, the session failed.
+    #   verify the number: final, the session failed and the fee is refunded.
     # @raise [Sendly::APIError] 409 +whatsapp_signup_in_progress+ (a Facebook
     #   connection for the number is in flight; +e.response_body["id"]+ is
     #   that session), 409 +whatsapp_verification_in_progress+ (a Facebook
@@ -594,14 +598,14 @@ module Sendly
     #   still being added, so try again in a moment) or 409
     #   +whatsapp_already_enabled+.
     # @raise [Sendly::InsufficientCreditsError] 402 +payment_method_required+
-    #   or +payment_failed+: not returned while connecting a number is free.
+    #   or +payment_failed+ when the $9.99 fee can't be charged.
     # @raise [Sendly::ServerError] +whatsapp_verification_start_failed+ (503)
-    #   when WhatsApp couldn't start verifying the number: the session failed,
-    #   so start again. With +business_account_id+, a 5xx is raised at once
-    #   and never retried by the client, because each retry would start a
-    #   new session (a timeout or dropped connection is never retried
-    #   either). Without it the client retries a 5xx before raising, as
-    #   before.
+    #   when WhatsApp couldn't start verifying the number: the session failed
+    #   and its fee is refunded, so start again. With +business_account_id+,
+    #   a 5xx is raised at once and never retried by the client, because
+    #   each retry would start a new charged session (a timeout or dropped
+    #   connection is never retried either). Without it the client retries a
+    #   5xx before raising, as before.
     #
     # @example
     #   signup = client.whatsapp.signup.create(phone_number: "+15559876543")
@@ -646,7 +650,7 @@ module Sendly
     #   (422) for a wrong code, with the attempts left in
     #   +e.response_body["attemptsRemaining"]+
     # @raise [Sendly::APIError] 409 +whatsapp_verification_failed+ after 5
-    #   wrong codes (the session failed and
+    #   wrong codes (the session failed, the fee is refunded and
     #   +whatsapp_account.failed+ fires), 409 +whatsapp_verification_busy+
     #   while another code for the number is being checked (try again), or
     #   409 +signup_not_active+ when the signup isn't waiting for a code or is
@@ -1150,7 +1154,7 @@ module Sendly
   # create Meta-reviewed message templates, and send via
   # +client.messages.send(channel: "whatsapp", ...)+.
   #
-  # Connecting a number is free (no setup or monthly fee). The first
+  # Connecting a number costs a one-time $9.99 fee (no monthly fee). The first
   # number always ends with a human step: {WhatsAppSignupResource#create}
   # returns a +connect_url+ that a person must open in a browser and log in
   # with Facebook to link their WhatsApp Business Account. More numbers can
@@ -1192,7 +1196,7 @@ module Sendly
   # every method on this resource gets 404 +not_found+.
   #
   # @example Connect a number, create a template, then send
-  #   # 1. Connect (free; a human must open the connect URL)
+  #   # 1. Connect ($9.99 one-time; a human must open the connect URL)
   #   signup = client.whatsapp.signup.create(phone_number: "+15559876543")
   #   puts "Have your user open: #{signup.connect_url}"
   #
