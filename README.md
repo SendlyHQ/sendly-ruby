@@ -1896,6 +1896,38 @@ set only on the create or update response that made it. A connection that
 breaks a rule raises `Sendly::ValidationError` with a message like
 `connection.url: <reason>`.
 
+#### Test an agent's connection
+
+`client.voice.agents.test` reaches your own agent the way a call would,
+without placing one: `"custom_llm"` gets a signed, streamed chat completion
+with a test message, `"websocket"` gets a signed connection with a `start`
+carrying `test: true`, half a second of silence and a `stop`, and `"sip"` gets
+an `OPTIONS` request. Pass `kind:`, `connection:` or `instructions:` to test
+settings before saving them; nothing is saved.
+
+```ruby
+result = client.voice.agents.test(agent.id)
+puts "#{result.outcome}: #{result.message}" unless result.ok?
+result.steps.each { |step| puts "#{step.step} #{step.ok?} #{step.detail}" }
+
+# Try a new SIP address before saving it
+client.voice.agents.test(
+  agent.id,
+  kind: "sip",
+  connection: { uri: "sip:+15125550100@sip.example.com", transport: "tls" }
+)
+```
+
+A failed test is still a successful request, so check `ok?`. `outcome` is one
+of `Sendly::VoiceAgentTest::OUTCOMES` (`ok`, `blocked_destination`,
+`unreachable`, `timeout`, `tls_failed`, `auth_required`, `auth_failed`,
+`not_found`, `rejected`, `bad_reply`), and each step one of
+`Sendly::VoiceAgentTestStep::STEPS` (`address`, `connect`, `login`, `reply`);
+a value this SDK predates comes through unchanged. The result also carries
+`status` (the HTTP or SIP status, or `nil`), `latency_ms` and `signed?`. It
+needs the `calls:write` scope and a live key, sends no Idempotency-Key, and a
+workspace can run 10 tests a minute (`Sendly::RateLimitError` after that).
+
 ## Error Handling
 
 ```ruby

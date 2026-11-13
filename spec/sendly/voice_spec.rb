@@ -613,6 +613,97 @@ RSpec.describe 'Voice' do
     end
   end
 
+  describe 'agents test' do
+    let(:test_body) do
+      {
+        'ok' => true, 'outcome' => 'ok', 'message' => "Your agent's server answered in 84 ms.",
+        'status' => 200, 'latencyMs' => 84, 'signed' => false,
+        'steps' => [
+          { 'step' => 'address', 'ok' => true, 'detail' => 'sip.example.com points to a public server.' },
+          { 'step' => 'connect', 'ok' => true, 'detail' => 'Connected over TLS to sip.example.com:5061 in 41 ms.' },
+          { 'step' => 'reply', 'ok' => true, 'detail' => 'SIP 200 OK' }
+        ]
+      }
+    end
+
+    it 'POSTs an empty body without an Idempotency-Key and parses the result' do
+      seen = capture(:post, "/voice/agents/#{agent_id}/test", json(200, test_body))
+
+      result = voice.agents.test(agent_id)
+
+      expect(seen.size).to eq(1)
+      expect(JSON.parse(seen[0].body)).to eq({})
+      expect(seen[0].headers).not_to have_key('Idempotency-Key')
+      expect(result).to be_a(Sendly::VoiceAgentTest)
+      expect(result.ok?).to be true
+      expect(result.outcome).to eq('ok')
+      expect(result.message).to eq("Your agent's server answered in 84 ms.")
+      expect(result.status).to eq(200)
+      expect(result.latency_ms).to eq(84)
+      expect(result.signed?).to be false
+      expect(result.steps.map(&:step)).to eq(%w[address connect reply])
+      expect(result.steps.first).to be_a(Sendly::VoiceAgentTestStep)
+      expect(result.steps.last.ok?).to be true
+      expect(result.steps.last.detail).to eq('SIP 200 OK')
+      expect(Sendly::VoiceAgentTest::OUTCOMES).to include('auth_failed', 'bad_reply')
+      expect(Sendly::VoiceAgentTestStep::STEPS).to eq(%w[address connect login reply])
+    end
+
+    it 'sends kind, a camelCased connection and instructions' do
+      seen = capture(:post, "/voice/agents/#{agent_id}/test", json(200, test_body))
+
+      voice.agents.test(
+        agent_id, kind: 'custom_llm',
+        connection: { base_url: 'https://llm.example.com/v1', model: 'support-1', api_key: 'sk_example' },
+        instructions: 'Answer questions about opening hours.'
+      )
+
+      expect(JSON.parse(seen[0].body)).to eq(
+        'kind' => 'custom_llm',
+        'connection' => { 'baseUrl' => 'https://llm.example.com/v1', 'model' => 'support-1', 'apiKey' => 'sk_example' },
+        'instructions' => 'Answer questions about opening hours.'
+      )
+      expect(seen[0].headers).not_to have_key('Idempotency-Key')
+    end
+
+    it 'keeps an unknown outcome and step, and null status and latency' do
+      stub_request(:post, "#{base_url}/voice/agents/#{agent_id}/test")
+        .to_return(json(200, 'ok' => false, 'outcome' => 'certificate_expired',
+                             'message' => "Your agent's certificate has expired.",
+                             'status' => nil, 'latencyMs' => nil, 'signed' => true,
+                             'steps' => [{ 'step' => 'handshake', 'ok' => false, 'detail' => 'The certificate expired.' }]))
+
+      result = voice.agents.test(agent_id)
+
+      expect(result.ok?).to be false
+      expect(result.outcome).to eq('certificate_expired')
+      expect(result.status).to be_nil
+      expect(result.latency_ms).to be_nil
+      expect(result.signed?).to be true
+      expect(result.steps.first.step).to eq('handshake')
+      expect(result.steps.first.ok?).to be false
+    end
+
+    it 'rejects a blank id before any request' do
+      expect { voice.agents.test('') }.to raise_error(Sendly::ValidationError)
+    end
+
+    it 'raises NotFoundError on 404 agent_not_found' do
+      stub_request(:post, "#{base_url}/voice/agents/#{agent_id}/test")
+        .to_return(json(404, 'error' => 'agent_not_found', 'message' => 'Agent not found.'))
+
+      expect { voice.agents.test(agent_id) }.to raise_error(Sendly::NotFoundError)
+    end
+
+    it 'raises RateLimitError on 429 rate_limit_exceeded' do
+      no_retry = Sendly::Client.new(api_key: valid_api_key, max_retries: 0)
+      stub_request(:post, "#{base_url}/voice/agents/#{agent_id}/test")
+        .to_return(json(429, 'error' => 'rate_limit_exceeded', 'message' => 'Too many agent tests.'))
+
+      expect { no_retry.voice.agents.test(agent_id) }.to raise_error(Sendly::RateLimitError)
+    end
+  end
+
   describe 'voices' do
     it 'GETs /voice/voices and unwraps data into Voices' do
       stub_request_with_auth(:get, '/voice/voices', response_body: {

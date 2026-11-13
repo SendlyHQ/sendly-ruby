@@ -330,6 +330,89 @@ module Sendly
     end
   end
 
+  # One step of a connection test. +step+ is one of {STEPS}: "address" (the
+  # host resolved to a public address), "connect" (a connection opened),
+  # "login" (the SIP server accepted the credentials) or "reply" (the agent
+  # answered as it should). A step this SDK predates comes through
+  # unchanged. +detail+ says what happened at this step, in plain words.
+  class VoiceAgentTestStep
+    STEPS = %w[address connect login reply].freeze
+
+    attr_reader :step, :ok, :detail
+
+    def initialize(data)
+      data ||= {}
+      @step = data["step"]
+      @ok = data["ok"] == true
+      @detail = data["detail"]
+    end
+
+    # @return [Boolean] Whether this step worked
+    def ok?
+      ok
+    end
+
+    def to_h
+      { step: step, ok: ok, detail: detail }.compact
+    end
+  end
+
+  # What {VoiceAgentsResource#test} found. A failed test is still a
+  # successful request: check {#ok?}.
+  #
+  # +outcome+ is one of {OUTCOMES}: "ok", or why not: "blocked_destination"
+  # (the host isn't a public address), "unreachable", "timeout",
+  # "tls_failed", "auth_required" (the SIP server wants credentials the agent
+  # doesn't have), "auth_failed" (the key, token or credentials were
+  # refused), "not_found" (wrong path or SIP user), "rejected" (any other
+  # refusal) or "bad_reply" (an answer outside the protocol). An outcome this
+  # SDK predates comes through unchanged. +message+ is one or two sentences
+  # to show a person: what happened and what to change. +status+ is the HTTP
+  # or SIP status the agent answered with, or +nil+; +latency_ms+ how long
+  # the agent took to answer, or +nil+. +signed+ is whether the request
+  # carried +X-Sendly-Signature+, as calls do (always false for "sip").
+  # +steps+ lists each step tried, in order, up to the first that failed.
+  class VoiceAgentTest
+    OUTCOMES = %w[
+      ok blocked_destination unreachable timeout tls_failed auth_required
+      auth_failed not_found rejected bad_reply
+    ].freeze
+
+    attr_reader :ok, :outcome, :message, :status, :latency_ms, :signed, :steps
+
+    # @return [Hash] The raw parsed response
+    attr_reader :raw
+
+    def initialize(data)
+      data ||= {}
+      @raw = data
+      @ok = data["ok"] == true
+      @outcome = data["outcome"]
+      @message = data["message"]
+      @status = data["status"]
+      @latency_ms = data.key?("latencyMs") ? data["latencyMs"] : data["latency_ms"]
+      @signed = data["signed"] == true
+      @steps = (data["steps"] || []).map { |step| VoiceAgentTestStep.new(step) }
+    end
+
+    # @return [Boolean] Whether the agent answered the way a call needs
+    def ok?
+      ok
+    end
+
+    # @return [Boolean] Whether the request carried +X-Sendly-Signature+
+    def signed?
+      signed
+    end
+
+    def to_h
+      {
+        ok: ok, outcome: outcome, message: message, status: status,
+        latency_ms: latency_ms, signed: signed, steps: steps.map(&:to_h)
+      }
+    end
+  end
+
   # The +data+ array a voice list method returns, as an Enumerable of
   # model objects.
   class VoiceDataList
@@ -775,6 +858,59 @@ module Sendly
 
       response = @client.patch(path, body, idempotency_key: idempotency_key)
       VoiceAgent.new(response)
+    end
+
+    # Test your own agent's connection the way a call would reach it,
+    # without placing one. Requires the +calls:write+ scope and a live key.
+    #
+    # "custom_llm" gets a signed, streamed chat completion with a test
+    # message. "websocket" gets a signed connection with +connected+, a
+    # +start+ carrying +test: true+, half a second of silence and a +stop+
+    # with reason +test_finished+. "sip" gets an +OPTIONS+ request, answered
+    # with the saved credentials if the server asks; a SIP server answering
+    # shows the address and credentials work, not which agent picks up.
+    #
+    # Pass +connection+ to test settings before saving them. A workspace can
+    # run 10 tests a minute. No Idempotency-Key is sent.
+    #
+    # @param id [String] Agent identifier
+    # @param kind [String, nil] "custom_llm", "sip" or "websocket": the kind
+    #   of the settings in +connection+. Defaults to the agent's own kind.
+    #   Needed to test settings of another kind, such as on a "sendly" agent
+    #   before switching it.
+    # @param connection [Hash, nil] Settings to test instead of the saved
+    #   ones, in the same shape as on {#create}. Nothing is saved. For the
+    #   agent's own kind, a secret left out is taken from the saved
+    #   connection, while the host stays the same.
+    # @param instructions [String, nil] For "custom_llm": the system prompt to
+    #   send, up to 4000 characters. Defaults to the agent's instructions.
+    # @return [Sendly::VoiceAgentTest] What the test found; check +ok?+
+    # @raise [Sendly::ValidationError] If +id+ is blank, or HTTP 400
+    #   +invalid_request+ (a "sendly" agent and no +kind+, or a +connection+
+    #   that breaks a rule)
+    # @raise [Sendly::NotFoundError] HTTP 404 +agent_not_found+
+    # @raise [Sendly::RateLimitError] HTTP 429 after 10 tests in a minute
+    # @raise [Sendly::APIError] HTTP 403 +byo_agents_not_enabled+ /
+    #   +live_key_required+
+    #
+    # @example
+    #   result = client.voice.agents.test("3c4d5e6f-7081-4293-a4b5-c6d7e8f90a1b")
+    #   puts "#{result.outcome}: #{result.message}" unless result.ok?
+    #
+    # @example Try a new address before saving it
+    #   client.voice.agents.test(
+    #     "3c4d5e6f-7081-4293-a4b5-c6d7e8f90a1b",
+    #     connection: { uri: "sip:+15125550100@sip.example.com", transport: "tls" }
+    #   )
+    def test(id, kind: nil, connection: nil, instructions: nil)
+      path = "#{VoiceInput.agent_path(id)}/test"
+      body = {}
+      body[:kind] = kind unless kind.nil?
+      body[:connection] = VoiceInput.connection_body(connection) unless connection.nil?
+      body[:instructions] = instructions unless instructions.nil?
+
+      response = @client.post(path, body, auto_idempotency_key: false)
+      VoiceAgentTest.new(response)
     end
 
     # Delete an agent and revoke its sending key. Requires the +calls:write+
