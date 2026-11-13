@@ -574,6 +574,11 @@ module Sendly
     #   the number (at most 512 characters). Defaults to the account's
     #   existing sender display name, then its business name. Only with
     #   +business_account_id+.
+    # @param idempotency_key [String, nil] Idempotency key for this operation
+    #   (1-255 printable ASCII characters). The client already sends one per
+    #   call; pass your own to make a repeat after a restart, or after an
+    #   error the client does not retry, return the first answer instead of
+    #   starting another charged signup.
     # @return [WhatsAppSignupSession]
     # @raise [Sendly::ServerError] +whatsapp_unavailable+ (503) while
     #   WhatsApp connections are unavailable. Nothing is charged. Only
@@ -617,7 +622,8 @@ module Sendly
     #     business_account_id: "102290129340398"
     #   )
     #   puts signup.status  # "verifying"
-    def create(phone_number:, business_account_id: nil, verification_method: nil, display_name: nil)
+    def create(phone_number:, business_account_id: nil, verification_method: nil, display_name: nil,
+               idempotency_key: nil)
       raise ValidationError, "phone_number is required" if phone_number.nil? || phone_number.to_s.empty?
       if !business_account_id.nil? && business_account_id.to_s.strip.empty?
         raise ValidationError, "business_account_id must be a non-empty string"
@@ -629,7 +635,8 @@ module Sendly
       body[:displayName] = display_name unless display_name.nil?
 
       by_code = !business_account_id.nil? && !business_account_id.to_s.empty?
-      response = @client.post("/whatsapp/signup", body, retry_server_errors: !by_code)
+      response = @client.post("/whatsapp/signup", body, idempotency_key: idempotency_key,
+                                                         retry_server_errors: !by_code)
       WhatsAppSignupSession.new(response)
     end
 
@@ -1039,6 +1046,10 @@ module Sendly
     # @param examples [Hash, nil] Example values for body placeholders,
     #   keyed by placeholder number: { "1" => "Acme Inc", "2" => "#4821" }.
     #   Required when the body has variables.
+    # @param idempotency_key [String, nil] Idempotency key for this operation
+    #   (1-255 printable ASCII characters). Repeating the call with the same
+    #   key within 24 hours returns the first answer instead of creating the
+    #   template again.
     # @return [WhatsAppTemplate] The created template (status "PENDING"),
     #   with any submission warnings
     # @raise [Sendly::NotFoundError] +whatsapp_sender_not_connected+ (404) if
@@ -1062,7 +1073,7 @@ module Sendly
     #   )
     #   puts template.status  # "PENDING"
     def create(sender:, name:, language:, category:, body:,
-               header: nil, footer: nil, buttons: nil, examples: nil)
+               header: nil, footer: nil, buttons: nil, examples: nil, idempotency_key: nil)
       raise ValidationError, "sender is required" if sender.nil? || sender.to_s.empty?
       raise ValidationError, "name is required" if name.nil? || name.to_s.empty?
       raise ValidationError, "language is required" if language.nil? || language.to_s.empty?
@@ -1081,7 +1092,7 @@ module Sendly
       payload[:buttons] = buttons if buttons
       payload[:examples] = examples if examples
 
-      response = @client.post("/whatsapp/templates", payload)
+      response = @client.post("/whatsapp/templates", payload, idempotency_key: idempotency_key)
       WhatsAppTemplate.new(response)
     end
 
@@ -1097,9 +1108,11 @@ module Sendly
     # @param id [String] The template's id
     # @param body [String, nil] Replacement body text
     # @param header [String, nil] Replacement text header; it can't contain
-    #   {{n}} variables (+template_header_variable_unsupported+)
-    # @param footer [String, nil] Replacement footer
-    # @param buttons [Array<Hash>, nil] Replacement buttons
+    #   {{n}} variables (+template_header_variable_unsupported+). Pass +""+
+    #   to remove the header
+    # @param footer [String, nil] Replacement footer. Pass +""+ to remove it
+    # @param buttons [Array<Hash>, nil] Replacement buttons. Pass +[]+ to
+    #   remove every button
     # @param examples [Hash, nil] Replacement example values for body placeholders
     # @return [WhatsAppTemplate] The updated template (status "PENDING")
     # @raise [Sendly::NotFoundError] If no such template exists

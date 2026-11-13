@@ -144,4 +144,111 @@ RSpec.describe Sendly::WebhooksResource do
         .to raise_error(Sendly::ValidationError, 'Test webhook failed: HTTP 500')
     end
   end
+
+  describe '#recovery_preview' do
+    let(:preview_body) do
+      {
+        'circuitState' => 'open',
+        'circuitOpenedAt' => '2026-09-25T08:00:00.000Z',
+        'failureCount' => 12,
+        'auditFailures' => {
+          'total' => 3,
+          'byStatus' => { 'failed' => 2, 'cancelled' => 1 },
+          'byEventType' => { 'message.delivered' => 2, 'message.opt_out' => 1 }
+        },
+        'missingFromMessages' => { 'total' => 4, 'byEventType' => { 'message.sent' => 4 } },
+        'histogram' => [{ 'bucket' => '2026-09-25T08:00:00.000Z', 'missing' => 4, 'failed' => 3 }],
+        'samples' => [{ 'id' => 'msg_1', 'toMasked' => '+1555***4567',
+                        'eventType' => 'message.delivered', 'occurredAt' => '2026-09-25T08:30:00.000Z' }],
+        'windowSuggestion' => { 'since' => '2026-09-25T08:00:00.000Z', 'until' => '2026-09-25T10:00:00.000Z' },
+        'since' => '2026-09-24T10:00:00.000Z',
+        'until' => '2026-09-25T10:00:00.000Z'
+      }
+    end
+
+    it 'sends the window with comma-separated event_types and reads the camelCase preview' do
+      stub = stub_request(:get, "#{base_url}/webhooks/whk_1/recovery-preview")
+             .with(query: { 'since' => '2026-09-24T10:00:00.000Z', 'until' => '2026-09-25T10:00:00.000Z',
+                            'event_types' => 'message.delivered,message.failed' })
+             .to_return(json_response(preview_body))
+
+      preview = webhooks.recovery_preview('whk_1', since: '2026-09-24T10:00:00.000Z',
+                                                   until_: '2026-09-25T10:00:00.000Z',
+                                                   event_types: %w[message.delivered message.failed])
+
+      expect(stub).to have_been_requested
+      expect(preview).to be_a(Sendly::WebhookRecoveryPreview)
+      expect(preview.circuit_state).to eq('open')
+      expect(preview).to be_circuit_open
+      expect(preview.circuit_opened_at).to eq(Time.parse('2026-09-25T08:00:00.000Z'))
+      expect(preview.failure_count).to eq(12)
+      expect(preview.audit_failures[:total]).to eq(3)
+      expect(preview.audit_failures[:by_status]).to eq('failed' => 2, 'cancelled' => 1)
+      expect(preview.audit_failures[:by_event_type]['message.opt_out']).to eq(1)
+      expect(preview.missing_from_messages[:total]).to eq(4)
+      expect(preview.histogram.first[:missing]).to eq(4)
+      expect(preview.samples.first[:to_masked]).to eq('+1555***4567')
+      expect(preview.samples.first[:event_type]).to eq('message.delivered')
+      expect(preview.window_suggestion[:since]).to eq(Time.parse('2026-09-25T08:00:00.000Z'))
+      expect(preview.until).to eq(Time.parse('2026-09-25T10:00:00.000Z'))
+      expect(preview.raw).to eq(preview_body)
+    end
+
+    it 'sends no query parameters when none are given' do
+      body = preview_body.merge('circuitOpenedAt' => nil, 'windowSuggestion' => nil)
+      stub = stub_request(:get, "#{base_url}/webhooks/whk_1/recovery-preview").to_return(json_response(body))
+
+      preview = webhooks.recovery_preview('whk_1')
+
+      expect(stub).to have_been_requested
+      expect(preview.circuit_opened_at).to be_nil
+      expect(preview.window_suggestion).to be_nil
+    end
+
+    it 'rejects an id that is not whk_ prefixed' do
+      expect { webhooks.recovery_preview('bad') }.to raise_error(ArgumentError)
+    end
+  end
+
+  describe 'stored metadata' do
+    def stored_webhook(metadata)
+      {
+        'id' => 'whk_placeholder1',
+        'url' => 'https://localhost/sendly-contract-capture',
+        'events' => ['message.received'],
+        'description' => 'Contract capture',
+        'mode' => 'test',
+        'is_active' => true,
+        'failure_count' => 0,
+        'circuit_state' => 'closed',
+        'api_version' => '2024-01',
+        'metadata' => metadata,
+        'created_at' => '2026-01-01T00:00:00.000Z',
+        'updated_at' => '2026-01-01T00:00:00.000Z',
+        'total_deliveries' => 0,
+        'successful_deliveries' => 0,
+        'success_rate' => 0,
+        'last_delivery_at' => nil
+      }
+    end
+
+    it 'reads object metadata on get' do
+      stub_request(:get, "#{base_url}/webhooks/whk_placeholder1")
+        .to_return(json_response(stored_webhook({ 'purpose' => 'contract-capture' })))
+
+      expect(webhooks.get('whk_placeholder1').metadata).to eq({ 'purpose' => 'contract-capture' })
+    end
+
+    [['a', 1], 'note', 7, true, nil].each do |stored|
+      it "reads #{stored.inspect} metadata as an empty Hash on list" do
+        stub_request(:get, "#{base_url}/webhooks").to_return(json_response([stored_webhook(stored)]))
+
+        webhook = webhooks.list.first
+
+        expect(webhook.id).to eq('whk_placeholder1')
+        expect(webhook.metadata).to eq({})
+        expect(webhook.to_h[:metadata]).to eq({})
+      end
+    end
+  end
 end

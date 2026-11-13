@@ -184,6 +184,16 @@ scheduled = client.messages.schedule(
 puts scheduled["id"]
 puts scheduled["scheduledAt"]
 
+# timezone is a label stored with the message and returned as sent ("UTC"
+# when left out). It does not change how scheduled_at is read, so give
+# scheduled_at an offset or Z.
+client.messages.schedule(
+  to: "+15125550123",
+  text: "Doors open at 9!",
+  scheduled_at: "2026-11-20T09:00:00-05:00",
+  timezone: "America/New_York"
+)
+
 # List scheduled messages (returns a Hash with "data" array)
 result = client.messages.list_scheduled
 result["data"].each { |msg| puts "#{msg['id']}: #{msg['scheduledAt']}" }
@@ -422,6 +432,10 @@ circuit is still open, so reset first:
 
 ```ruby
 client.webhooks.reset_circuit("whk_xxx")
+
+# See what a recovery would send, without sending anything
+preview = client.webhooks.recovery_preview("whk_xxx", since: (Time.now.utc - 86_400).iso8601)
+puts preview.audit_failures[:total], preview.missing_from_messages[:total]
 
 # Re-fire deliveries we recorded but could not deliver
 client.webhooks.redeliver("whk_xxx",
@@ -771,6 +785,10 @@ client.templates.publish(template.id)
 copy = client.templates.clone(template.id, name: "Order shipped (v2)")
 client.templates.delete(template.id)
 
+# Render a template, or any preset, with values. Nothing is sent.
+preview = client.templates.preview("tpl_preset_otp", variables: { code: "123456" })
+puts "#{preview.rendered_text} (#{preview.segment_count} segments)"
+
 # Generate a template with AI
 generated = client.templates.generate(description: "A friendly appointment reminder")
 puts generated.text
@@ -784,6 +802,7 @@ Two-way messaging threads with your contacts.
 ```ruby
 # List conversations (Enumerable)
 conversations = client.conversations.list(status: "active")
+vip = client.conversations.list(label: "lbl_xxx")  # only conversations with this label id
 conversations.each { |c| puts "#{c.phone_number}: #{c.last_message_text}" }
 
 # Get one, optionally with its messages
@@ -1015,10 +1034,54 @@ client.ten_dlc.list_assignments[:assignments].each { |a| puts "#{a.phone_number}
 
 ## Short Codes
 
-**This SDK has no short-code resource.** There is no `client.short_codes`;
-short-code applications are handled in the dashboard, or over REST. What
-the SDK does carry is the four lifecycle events, as constants you can
-subscribe to and branch on:
+A short code is a 5 or 6 digit US sender. Getting one is an application,
+not a purchase: you fill it in, Sendly reviews it, the carrier forms are
+signed, Sendly files it, and each carrier certifies the code. Reads need
+the `short_codes:read` scope and writes `short_codes:write`.
+
+```ruby
+# Every application and code, newest first (drafts and rejected ones too)
+client.short_codes.list.select(&:active?).each { |code| puts code.short_code }
+
+# The application, with the documents it needs, the quote and billing
+view = client.short_codes.application.get
+puts view.lock_message unless view.editable?
+puts view.quote[:setup_usd]                 # 999
+puts view.billing[:setup_fee][:status]      # "unpaid"
+
+# Save answers (snake_case or camelCase keys); the first save creates it
+client.short_codes.application.update(
+  use_case: "Delivery alerts for Acme orders",
+  message_frequency: "4 messages per month",
+  sample_messages: ["Acme: your order shipped. Reply STOP to opt out."]
+)
+
+# Check against the carrier rules without saving anything
+check = client.short_codes.application.check
+check.issues.each { |issue| puts "#{issue.path}: #{issue.message}" } unless check.ok?
+
+# Submit: charges the one-time $999 setup fee to the card on file, and
+# accepts the monthly lease from go-live and the 3-month minimum
+result = client.short_codes.application.submit(
+  accept_terms: true,
+  idempotency_key: "short-code-submit-1"
+)
+puts result.application.review_status  # "awaiting_review"
+puts result.payment                     # { status: "paid", charged: true }
+```
+
+`update` and `submit` accept `idempotency_key:`; a repeat with the same key
+returns the first answer. Submitting twice is safe anyway: the second call
+reports `already_submitted?` and charges nothing. Nested values (`prefill`,
+`quote`, `billing`, `verification`, `carriers`, `payment`) are Hashes with
+snake_case Symbol keys. Submit raises `Sendly::APIError` 403
+`verification_required` until the business is verified,
+`Sendly::ValidationError` 422 `short_code_invalid_application` naming every
+field, and `Sendly::InsufficientCreditsError` 402 when the fee can't be
+charged (`e.response_body["checkoutUrl"]` is the payment page when the bank
+needs to confirm it).
+
+The four lifecycle events are constants you can subscribe to and branch on:
 
 ```ruby
 client.webhooks.create(
@@ -1043,33 +1106,6 @@ end
 These are lifecycle events, so `event.message` is `nil` and you read
 `data.object` through `event.data` or `event.raw_object`, as with every
 other non-message event.
-
-To drive an application from code meanwhile, call the REST endpoints
-directly with an API key holding the `short_codes:read` /
-`short_codes:write` scopes:
-
-| Method | Path | Scope |
-|--------|------|-------|
-| `GET` | `/api/v1/short_codes` | `short_codes:read` |
-| `POST` | `/api/v1/short_codes/requests` | `short_codes:write` |
-| `GET` | `/api/v1/short_codes/application` | `short_codes:read` |
-| `PUT` | `/api/v1/short_codes/application` | `short_codes:write` |
-| `POST` | `/api/v1/short_codes/application/preflight` | `short_codes:read` |
-| `POST` | `/api/v1/short_codes/application/submit` | `short_codes:write` |
-
-The client's own HTTP
-methods reach them without a dedicated resource — paths are relative to the
-`/api/v1` base:
-
-```ruby
-application = client.get("/short_codes/application")
-```
-
-The write endpoints take the application form's fields as their body. This
-SDK does not model them, so check the API reference for the shape rather
-than guessing: `client.put` and `client.post` pass a Hash through as JSON
-unchanged (`client.delete` takes no body), and every `client.post` carries an
-`Idempotency-Key` as usual.
 
 ## Business Entity Upgrade
 
@@ -1193,8 +1229,10 @@ gives its slot back. Note: Meta
 has paused marketing template delivery to US (+1) numbers.
 
 ```ruby
-# 1. Connect a number ($9.99 one-time; a human must open the connect URL)
-signup = client.whatsapp.signup.create(phone_number: "+15125550123")
+# 1. Connect a number ($9.99 one-time; a human must open the connect URL).
+# Pass idempotency_key: so a repeat after a restart returns the same signup.
+signup = client.whatsapp.signup.create(phone_number: "+15125550123",
+                                       idempotency_key: "connect-+15125550123")
 puts "Have your user open: #{signup.connect_url}"
 
 # 2. Poll until active. After the Facebook step the signup is "registering"
@@ -1275,7 +1313,8 @@ template = client.whatsapp.templates.create(
   category: "UTILITY",
   header: "Order update",  # fixed text only: a header with {{n}} is refused
   body: "Hi {{1}}, your order {{2}} has shipped!",
-  examples: { "1" => "Sam", "2" => "#4821" }
+  examples: { "1" => "Sam", "2" => "#4821" },
+  idempotency_key: "tpl-order-shipped"  # optional: a repeat returns the first answer
 )
 puts template.status  # "PENDING"
 
@@ -1283,6 +1322,8 @@ puts template.status  # "PENDING"
 client.whatsapp.templates.list[:templates].each { |t| puts "#{t.name} — #{t.status}" }
 client.whatsapp.templates.update(template.id, body: "Hi {{1}}, order {{2}} is on its way!",
                                               examples: { "1" => "Sam", "2" => "#4821" })
+# "" removes the header or footer, [] removes every button
+client.whatsapp.templates.update(template.id, footer: "", buttons: [])
 client.whatsapp.templates.delete(template.id)
 
 # 4. Send — free-form inside an open 24h window, template anytime. The window
@@ -2154,6 +2195,10 @@ Three provisioning modes:
 ```ruby
 ws = client.enterprise.workspaces.create(name: "Acme Insurance")
 list = client.enterprise.workspaces.list
+# Filters: limit (up to 100), page, search, status, verification ("unverified"),
+# sort ("created_desc", "name_asc", "credits_desc", ...), compact, tags
+unverified = client.enterprise.workspaces.list(verification: "unverified", sort: "name_asc",
+                                               tags: ["tag_vip"], limit: 100)
 detail = client.enterprise.workspaces.get("ws_xxx")
 client.enterprise.workspaces.delete("ws_xxx")
 ```
@@ -2206,6 +2251,8 @@ client.enterprise.workspaces.inherit_verification("ws_other", source_workspace_i
                                                               purchase_new_number: true)
 client.enterprise.workspaces.get_verification("ws_xxx")
 client.enterprise.upload_verification_document("./CP-575.pdf", workspace_id: "ws_xxx")
+# The type comes from the extension; pass content_type: for a file without one
+client.enterprise.upload_verification_document("./ein-letter", content_type: "application/pdf")
 
 # Hosted opt-in pages, and a generated business page
 client.enterprise.workspaces.list_opt_in_pages("ws_xxx")

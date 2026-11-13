@@ -308,6 +308,33 @@ RSpec.describe Sendly::Messages do
         expect(message.id).to eq('msg_123/special')
         expect(stub).to have_been_requested
       end
+
+      it 'reads message_format, batch_id and media_urls in both spellings' do
+        stub_request_with_auth(:get, '/messages/msg_mms',
+                               response_body: message_response(
+                                 'id' => 'msg_mms',
+                                 'message_format' => 'mms', 'messageFormat' => 'mms',
+                                 'batch_id' => 'batch_1', 'batchId' => 'batch_1',
+                                 'media_urls' => ['https://cdn.example.com/r.png'],
+                                 'mediaUrls' => ['https://cdn.example.com/r.png']
+                               ))
+
+        message = messages.get('msg_mms')
+        expect(message.message_format).to eq('mms')
+        expect(message.batch_id).to eq('batch_1')
+        expect(message.media_urls).to eq(['https://cdn.example.com/r.png'])
+        expect(message.to_h).to include(batch_id: 'batch_1', message_format: 'mms')
+      end
+
+      it 'leaves batch_id nil for a message outside a batch' do
+        stub_request_with_auth(:get, '/messages/msg_abc123',
+                               response_body: message_response('batchId' => nil, 'mediaUrls' => nil))
+
+        message = messages.get('msg_abc123')
+        expect(message.batch_id).to be_nil
+        expect(message.media_urls).to eq([])
+        expect(message.to_h).not_to have_key(:batch_id)
+      end
     end
 
     context 'validation errors' do

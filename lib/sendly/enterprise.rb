@@ -15,8 +15,39 @@ module Sendly
       @client.post("/enterprise/workspaces", body)
     end
 
-    def list
-      @client.get("/enterprise/workspaces")
+    # List the workspaces the enterprise key's owner owns, with totals over
+    # all of them. Every filter is optional; with none the API returns the
+    # first page of 50, newest first.
+    #
+    # @param limit [Integer, nil] Page size, up to 100 (default 50)
+    # @param page [Integer, nil] The page, starting at 1
+    # @param search [String, nil] Only workspaces whose name contains this, ignoring case
+    # @param status [String, nil] Only workspaces with this status ("all", the default, keeps all)
+    # @param verification [String, nil] Only workspaces whose verification has this
+    #   status; "unverified" keeps those with none ("all", the default, keeps all)
+    # @param sort [String, nil] "created_desc" (the default), "created_asc",
+    #   "name_asc", "name_desc", "credits_desc" or "credits_asc"
+    # @param compact [Boolean, nil] +true+ returns every workspace's id, name and
+    #   balance instead, ignoring the other filters and paging
+    # @param tags [Array<String>, String, nil] Tag ids: only workspaces with at
+    #   least one of them. Sent comma-separated
+    # @return [Hash]
+    #
+    # @example
+    #   client.enterprise.workspaces.list(search: "acme", sort: "name_asc", limit: 50)
+    def list(limit: nil, page: nil, search: nil, status: nil, verification: nil, sort: nil,
+             compact: nil, tags: nil)
+      params = {}
+      params[:limit] = limit unless limit.nil?
+      params[:page] = page unless page.nil?
+      params[:search] = search unless search.nil?
+      params[:status] = status unless status.nil?
+      params[:verification] = verification unless verification.nil?
+      params[:sort] = sort unless sort.nil?
+      params[:compact] = compact unless compact.nil?
+      params[:tags] = Array(tags).join(",") unless tags.nil?
+
+      @client.get("/enterprise/workspaces", params)
     end
 
     def get(workspace_id)
@@ -468,18 +499,38 @@ module Sendly
       @client.post("/enterprise/business-page/generate", body)
     end
 
-    def upload_verification_document(file_path, workspace_id: nil, verification_id: nil)
+    # Upload a business registration document for a toll-free verification.
+    #
+    # The API accepts a PNG, JPEG, GIF or WEBP image or a PDF, up to 10 MB,
+    # and reads the type from the part's content type. It is taken from the
+    # file's extension; pass +content_type+ when the file has no extension
+    # or a different one, or the upload is refused.
+    #
+    # @param file_path [String] Path to the document
+    # @param workspace_id [String, nil] Make it that workspace's verification document
+    # @param verification_id [String, nil] Make it that verification's registration document
+    # @param content_type [String, nil] The file's type, such as "image/png" or
+    #   "application/pdf" (default: from the extension)
+    # @return [Hash] The stored document's +url+ and +id+
+    #
+    # @example
+    #   client.enterprise.upload_verification_document("/tmp/ein-letter", content_type: "application/pdf")
+    def upload_verification_document(file_path, workspace_id: nil, verification_id: nil, content_type: nil)
       raise ArgumentError, "File path is required" if file_path.nil? || file_path.empty?
       raise ArgumentError, "File not found: #{file_path}" unless File.exist?(file_path)
+      if !content_type.nil? && (content_type.to_s.strip.empty? || content_type.to_s.match?(/[\r\n]/))
+        raise ArgumentError, "content_type must be a MIME type such as \"application/pdf\""
+      end
 
-      content_type = case File.extname(file_path).downcase
-                     when ".jpg", ".jpeg" then "image/jpeg"
-                     when ".png" then "image/png"
-                     when ".gif" then "image/gif"
-                     when ".pdf" then "application/pdf"
-                     when ".webp" then "image/webp"
-                     else "application/octet-stream"
-                     end
+      content_type = content_type.nil? ? nil : content_type.to_s.strip
+      content_type ||= case File.extname(file_path).downcase
+                       when ".jpg", ".jpeg" then "image/jpeg"
+                       when ".png" then "image/png"
+                       when ".gif" then "image/gif"
+                       when ".pdf" then "application/pdf"
+                       when ".webp" then "image/webp"
+                       else "application/octet-stream"
+                       end
 
       filename = File.basename(file_path).gsub('"', "%22").gsub("\r", "%0D").gsub("\n", "%0A")
 

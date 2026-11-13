@@ -104,6 +104,43 @@ RSpec.describe Sendly::WhatsAppResource do
           whatsapp.signup.create(phone_number: '+15559876543', business_account_id: '   ')
         }.to raise_error(Sendly::ValidationError, /business_account_id must be a non-empty string/)
       end
+
+      it 'sends a caller idempotency key verbatim' do
+        stub = stub_request(:post, "#{base_url}/whatsapp/signup")
+          .with(headers: { 'Idempotency-Key' => 'connect-+15559876543' })
+          .to_return(status: 201, body: signup_session_response.to_json)
+
+        whatsapp.signup.create(phone_number: '+15559876543', idempotency_key: 'connect-+15559876543')
+
+        expect(stub).to have_been_requested
+      end
+
+      it 'sends a caller idempotency key when adding a number by code' do
+        stub = stub_request(:post, "#{base_url}/whatsapp/signup")
+          .with(
+            headers: { 'Idempotency-Key' => 'add-4155550124' },
+            body: { phoneNumber: '+14155550124', businessAccountId: '102290129340398' }.to_json
+          )
+          .to_return(status: 201, body: signup_response('status' => 'verifying').to_json)
+
+        signup = whatsapp.signup.create(phone_number: '+14155550124',
+                                        business_account_id: '102290129340398',
+                                        idempotency_key: 'add-4155550124')
+
+        expect(stub).to have_been_requested
+        expect(signup.status).to eq('verifying')
+      end
+
+      it 'generates an idempotency key when none is given' do
+        keys = []
+        stub_request(:post, "#{base_url}/whatsapp/signup")
+          .with { |req| keys << req.headers['Idempotency-Key'] }
+          .to_return(status: 201, body: signup_session_response.to_json)
+
+        whatsapp.signup.create(phone_number: '+15559876543')
+
+        expect(keys.first).to start_with('sendly-ruby-retry-')
+      end
     end
 
     describe '#get' do
@@ -378,6 +415,23 @@ RSpec.describe Sendly::WhatsAppResource do
         expect(template.warnings).to eq(['marketing template has no opt-out button'])
       end
 
+      it 'sends a caller idempotency key verbatim' do
+        stub = stub_request(:post, "#{base_url}/whatsapp/templates")
+          .with(headers: { 'Idempotency-Key' => 'tpl-order-shipped' })
+          .to_return(status: 200, body: template_response.to_json)
+
+        whatsapp.templates.create(
+          sender: '+15559876543',
+          name: 'order_shipped',
+          language: 'en_US',
+          category: 'UTILITY',
+          body: 'Your order has shipped!',
+          idempotency_key: 'tpl-order-shipped'
+        )
+
+        expect(stub).to have_been_requested
+      end
+
       it 'raises ValidationError when sender is empty' do
         expect {
           whatsapp.templates.create(sender: '', name: 'x', language: 'en_US',
@@ -420,6 +474,16 @@ RSpec.describe Sendly::WhatsAppResource do
           .to_return(status: 200, body: template_response.to_json)
 
         whatsapp.templates.update('wat/weird', body: 'New body')
+        expect(stub).to have_been_requested
+      end
+
+      it 'sends an empty footer and header and no buttons to remove them' do
+        stub = stub_request(:patch, "#{base_url}/whatsapp/templates/wat_abc123")
+          .with(body: { header: '', footer: '', buttons: [] }.to_json)
+          .to_return(status: 200, body: template_response.to_json)
+
+        whatsapp.templates.update('wat_abc123', header: '', footer: '', buttons: [])
+
         expect(stub).to have_been_requested
       end
 

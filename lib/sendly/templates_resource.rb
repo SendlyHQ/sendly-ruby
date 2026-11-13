@@ -229,6 +229,27 @@ module Sendly
       Template.new(response)
     end
 
+    # Render one of the workspace's templates, or any preset, with the values
+    # you give. Nothing is sent or saved.
+    #
+    # @param id [String] Template ID
+    # @param variables [Hash, nil] Values by variable key:
+    #   +{ "code" => "123456" }+ fills +{{code}}+. Without it, each variable
+    #   renders with its fallback.
+    # @return [Sendly::TemplatePreview]
+    # @raise [Sendly::NotFoundError] if no preset and no template of the key's
+    #   workspace has this id
+    #
+    # @example
+    #   preview = client.templates.preview("tpl_preset_otp", variables: { code: "123456" })
+    #   puts preview.rendered_text
+    def preview(id, variables: nil)
+      body = {}
+      body[:variables] = variables if variables
+      response = @client.post("/templates/#{URI.encode_www_form_component(id)}/preview", body)
+      TemplatePreview.new(response)
+    end
+
     def generate(description:, category: nil)
       body = { description: description }
       body[:category] = category if category

@@ -67,6 +67,49 @@ RSpec.describe 'Uploads that build their own multipart body' do
     end
   end
 
+  describe 'enterprise.upload_verification_document content type' do
+    let(:url) { "#{base_url}/enterprise/verification-document/upload" }
+
+    def part_content_type(body)
+      body[/name="file"[^\r\n]*\r\nContent-Type: ([^\r\n]*)/, 1]
+    end
+
+    it 'takes the type from the extension by default' do
+      sent = capture_body(url) do
+        with_file('ein.png') { |path| client.enterprise.upload_verification_document(path) }
+      end
+
+      expect(part_content_type(sent)).to eq('image/png')
+    end
+
+    it 'sends the content_type given for a file without an extension' do
+      sent = capture_body(url) do
+        with_file('ein-letter') do |path|
+          client.enterprise.upload_verification_document(path, content_type: 'application/pdf')
+        end
+      end
+
+      expect(part_content_type(sent)).to eq('application/pdf')
+    end
+
+    it 'prefers the content_type given over the extension' do
+      sent = capture_body(url) do
+        with_file('scan.bin') { |path| client.enterprise.upload_verification_document(path, content_type: 'image/jpeg') }
+      end
+
+      expect(part_content_type(sent)).to eq('image/jpeg')
+    end
+
+    it 'refuses a blank content_type or one with a line break before sending' do
+      with_file('ein.pdf') do |path|
+        expect { client.enterprise.upload_verification_document(path, content_type: ' ') }
+          .to raise_error(ArgumentError, /content_type/)
+        expect { client.enterprise.upload_verification_document(path, content_type: "image/png\r\nX: y") }
+          .to raise_error(ArgumentError, /content_type/)
+      end
+    end
+  end
+
   describe 'business_upgrade.start' do
     let(:url) { "#{base_url}/workspaces/ws_1/upgrade" }
     let(:required) { { brn: '12-3456789', brn_type: 'EIN', brn_country: 'US', entity_type: 'PRIVATE_PROFIT' } }

@@ -19,7 +19,7 @@ module Sendly
       Rule.new(response)
     end
 
-    def update(id, name: nil, conditions: nil, actions: nil, priority: nil)
+    def update(id, name: nil, conditions: nil, actions: nil, priority: nil, enabled: nil)
       raise ValidationError, "Rule ID is required" if id.nil? || id.empty?
 
       body = {}
@@ -27,6 +27,7 @@ module Sendly
       body[:conditions] = conditions if conditions
       body[:actions] = actions if actions
       body[:priority] = priority if priority
+      body[:enabled] = enabled unless enabled.nil?
 
       response = @client.patch("/rules/#{URI.encode_www_form_component(id)}", body)
       Rule.new(response)

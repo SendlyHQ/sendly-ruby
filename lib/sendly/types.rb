@@ -77,6 +77,10 @@ module Sendly
     #   message it replaced
     attr_reader :fallback_of
 
+    # @return [String, nil] The batch that sent the message; nil unless it is
+    #   a batch message
+    attr_reader :batch_id
+
     # Message status constants (sending removed - doesn't exist in database)
     STATUSES = %w[queued sent delivered failed bounced retrying].freeze
 
@@ -108,6 +112,7 @@ module Sendly
       @message_format = data["messageFormat"] || data["message_format"] || "sms"
       @fallback = data["fallback"].is_a?(Hash) ? WhatsAppSmsFallback.new(data["fallback"]) : nil
       @fallback_of = data["fallbackOf"] || data["fallback_of"]
+      @batch_id = data["batchId"] || data["batch_id"]
     end
 
     # Check if message was delivered
@@ -155,7 +160,8 @@ module Sendly
         media_urls: media_urls,
         message_format: message_format,
         fallback: fallback&.to_h,
-        fallback_of: fallback_of
+        fallback_of: fallback_of,
+        batch_id: batch_id
       }.compact
     end
 
@@ -368,7 +374,7 @@ module Sendly
       @circuit_state = data["circuit_state"] || data["circuitState"] || "closed"
       @circuit_opened_at = parse_time(data["circuit_opened_at"] || data["circuitOpenedAt"])
       @api_version = data["api_version"] || data["apiVersion"] || "2024-01"
-      @metadata = data["metadata"] || {}
+      @metadata = data["metadata"].is_a?(Hash) ? data["metadata"] : {}
       @created_at = parse_time(data["created_at"] || data["createdAt"])
       @updated_at = parse_time(data["updated_at"] || data["updatedAt"])
       @total_deliveries = data["total_deliveries"] || data["totalDeliveries"] || 0
@@ -536,6 +542,98 @@ module Sendly
       @new_secret_version = data["new_secret_version"] || data["newSecretVersion"]
       @grace_period_hours = data["grace_period_hours"] || data["gracePeriodHours"]
       @rotated_at = parse_time(data["rotated_at"] || data["rotatedAt"])
+    end
+
+    private
+
+    def parse_time(value)
+      return nil if value.nil?
+      Time.parse(value)
+    rescue ArgumentError
+      nil
+    end
+  end
+
+  # What a webhook recovery would do for a window, without sending anything
+  #
+  # Returned by {Sendly::WebhooksResource#recovery_preview}. The API sends
+  # its keys in camelCase; the readers are snake_case and nested values are
+  # Hashes with symbol keys. Count maps keep the API's string keys, such as
+  # "failed" or "message.delivered".
+  class WebhookRecoveryPreview
+    # @return [String] "closed", "open" or "half_open"
+    attr_reader :circuit_state
+
+    # @return [Time, nil] When the circuit opened
+    attr_reader :circuit_opened_at
+
+    # @return [Integer] Failed deliveries in the current streak
+    attr_reader :failure_count
+
+    # @return [Hash] Failed and cancelled deliveries in the window, what
+    #   {Sendly::WebhooksResource#redeliver} would send:
+    #   +{ total:, by_status:, by_event_type: }+
+    attr_reader :audit_failures
+
+    # @return [Hash] Message events with no delivery in the window, what
+    #   {Sendly::WebhooksResource#backfill} would send: +{ total:, by_event_type: }+
+    attr_reader :missing_from_messages
+
+    # @return [Array<Hash>] The window in up to 24 equal buckets, oldest
+    #   first: +{ bucket:, missing:, failed: }+
+    attr_reader :histogram
+
+    # @return [Array<Hash>] Up to 5 affected events:
+    #   +{ id:, to_masked:, event_type:, occurred_at: }+
+    attr_reader :samples
+
+    # @return [Hash, nil] The outage window, +{ since:, until: }+, when the
+    #   circuit has an opening time
+    attr_reader :window_suggestion
+
+    # @return [Time, nil] The window's start
+    attr_reader :since
+
+    # @return [Time, nil] The window's end
+    attr_reader :until
+
+    # @return [Hash] The raw parsed response
+    attr_reader :raw
+
+    def initialize(data)
+      @raw = data
+      @circuit_state = data["circuitState"]
+      @circuit_opened_at = parse_time(data["circuitOpenedAt"])
+      @failure_count = data["failureCount"] || 0
+      audit = data["auditFailures"] || {}
+      @audit_failures = {
+        total: audit["total"] || 0,
+        by_status: audit["byStatus"] || {},
+        by_event_type: audit["byEventType"] || {}
+      }
+      missing = data["missingFromMessages"] || {}
+      @missing_from_messages = {
+        total: missing["total"] || 0,
+        by_event_type: missing["byEventType"] || {}
+      }
+      @histogram = (data["histogram"] || []).map do |b|
+        { bucket: parse_time(b["bucket"]), missing: b["missing"], failed: b["failed"] }
+      end
+      @samples = (data["samples"] || []).map do |s|
+        { id: s["id"], to_masked: s["toMasked"], event_type: s["eventType"],
+          occurred_at: parse_time(s["occurredAt"]) }
+      end
+      suggestion = data["windowSuggestion"]
+      @window_suggestion = suggestion && {
+        since: parse_time(suggestion["since"]),
+        until: parse_time(suggestion["until"])
+      }
+      @since = parse_time(data["since"])
+      @until = parse_time(data["until"])
+    end
+
+    def circuit_open?
+      circuit_state == "open"
     end
 
     private
@@ -854,10 +952,24 @@ module Sendly
     # @return [String, nil] Model that generated the suggestions
     attr_reader :model
 
+    # @return [Boolean] True when the workspace's enterprise account turned
+    #   AI suggestions off; {#suggestions} is then empty
+    attr_reader :disabled
+
+    # @return [String, nil] Why suggestions are off: "enterprise_policy".
+    #   Nil unless {#disabled} is true
+    attr_reader :reason
+
     def initialize(data)
       @suggestions = (data["suggestions"] || []).map { |s| SuggestedReply.new(s) }
       @based_on_message_id = data["basedOnMessageId"] || data["based_on_message_id"]
       @model = data["model"]
+      @disabled = data["disabled"] == true
+      @reason = data["reason"]
+    end
+
+    def disabled?
+      disabled
     end
 
     def each(&block)
@@ -883,7 +995,9 @@ module Sendly
       {
         suggestions: suggestions.map(&:to_h),
         based_on_message_id: based_on_message_id,
-        model: model
+        model: model,
+        disabled: (disabled || nil),
+        reason: reason
       }.compact
     end
   end
@@ -1087,7 +1201,7 @@ module Sendly
   # ============================================================================
 
   class Rule
-    attr_reader :id, :name, :conditions, :actions, :priority, :created_at, :updated_at
+    attr_reader :id, :name, :conditions, :actions, :priority, :enabled, :created_at, :updated_at
 
     def initialize(data)
       @id = data["id"]
@@ -1095,6 +1209,7 @@ module Sendly
       @conditions = data["conditions"] || {}
       @actions = data["actions"] || {}
       @priority = data["priority"]
+      @enabled = data["enabled"]
       @created_at = parse_time(data["createdAt"] || data["created_at"])
       @updated_at = parse_time(data["updatedAt"] || data["updated_at"])
     end
@@ -1120,6 +1235,42 @@ module Sendly
   # ============================================================================
   # Generated Template
   # ============================================================================
+
+  # A template rendered with the values you gave. Nothing is sent or saved.
+  class TemplatePreview
+    # @return [String] The template's id
+    attr_reader :template_id
+
+    # @return [String] The template's text, unrendered
+    attr_reader :original_text
+
+    # @return [String] The text with each +{{key}}+ replaced by the value you
+    #   sent, else the variable's fallback. A variable with neither stays as
+    #   +{{key}}+.
+    attr_reader :rendered_text
+
+    # @return [Integer, nil] The rendered text's length, in UTF-16 code units
+    attr_reader :character_count
+
+    # @return [Integer, nil] How many SMS segments the rendered text needs
+    attr_reader :segment_count
+
+    def initialize(data)
+      @template_id = data["template_id"] || data["templateId"]
+      @original_text = data["original_text"] || data["originalText"]
+      @rendered_text = data["rendered_text"] || data["renderedText"]
+      @character_count = data["character_count"] || data["characterCount"]
+      @segment_count = data["segment_count"] || data["segmentCount"]
+    end
+
+    def to_h
+      {
+        template_id: template_id, original_text: original_text,
+        rendered_text: rendered_text, character_count: character_count,
+        segment_count: segment_count
+      }.compact
+    end
+  end
 
   class GeneratedTemplate
     attr_reader :name, :text, :variables, :category

@@ -64,6 +64,28 @@ RSpec.describe Sendly::ConversationsResource do
       expect(result.count).to eq(0)
     end
 
+    it 'is not disabled when the API sends suggestions' do
+      stub_request_with_auth(:post, '/conversations/conv_abc123/suggest-replies',
+                             response_body: suggest_replies_response)
+
+      result = conversations.suggest_replies('conv_abc123')
+      expect(result.disabled?).to be false
+      expect(result.reason).to be_nil
+      expect(result.to_h).not_to have_key(:disabled)
+    end
+
+    it 'reads disabled and reason when the enterprise turned suggestions off' do
+      stub_request_with_auth(:post, '/conversations/conv_abc123/suggest-replies',
+                             response_body: { 'suggestions' => [], 'disabled' => true,
+                                              'reason' => 'enterprise_policy' })
+
+      result = conversations.suggest_replies('conv_abc123')
+      expect(result).to be_empty
+      expect(result.disabled?).to be true
+      expect(result.reason).to eq('enterprise_policy')
+      expect(result.to_h).to include(disabled: true, reason: 'enterprise_policy')
+    end
+
     it 'raises ValidationError when id is nil' do
       expect { conversations.suggest_replies(nil) }
         .to raise_error(Sendly::ValidationError, /Conversation ID is required/)
@@ -72,6 +94,25 @@ RSpec.describe Sendly::ConversationsResource do
     it 'raises ValidationError when id is empty' do
       expect { conversations.suggest_replies('') }
         .to raise_error(Sendly::ValidationError, /Conversation ID is required/)
+    end
+  end
+
+  describe '#list' do
+    it 'filters by label id' do
+      stub = stub_request_with_auth(:get, '/conversations?limit=20&offset=0&label=lbl_vip',
+                                    response_body: { 'data' => [], 'pagination' => { 'total' => 0, 'hasMore' => false } })
+
+      conversations.list(label: 'lbl_vip')
+
+      expect(stub).to have_been_requested
+    end
+
+    it 'passes the label filter through each' do
+      stub = stub_request_with_auth(:get, '/conversations?limit=100&offset=0&status=active&label=lbl_vip',
+                                    response_body: { 'data' => [], 'pagination' => { 'total' => 0, 'hasMore' => false } })
+
+      expect(conversations.each(status: 'active', label: 'lbl_vip').to_a).to be_empty
+      expect(stub).to have_been_requested
     end
   end
 

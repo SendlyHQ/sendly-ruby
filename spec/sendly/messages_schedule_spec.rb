@@ -66,6 +66,29 @@ RSpec.describe Sendly::Messages, 'Scheduling' do
         expect(stub).to have_been_requested
       end
 
+      it 'sends timezone when given' do
+        stub = stub_request(:post, "#{base_url}/messages/schedule")
+          .with(
+            body: {
+              to: '+15551234567',
+              text: 'Test',
+              scheduledAt: '2025-01-20T10:00:00-05:00',
+              timezone: 'America/New_York'
+            }.to_json
+          )
+          .to_return(status: 201, body: scheduled_message_response.merge('timezone' => 'America/New_York').to_json)
+
+        result = messages.schedule(
+          to: '+15551234567',
+          text: 'Test',
+          scheduled_at: '2025-01-20T10:00:00-05:00',
+          timezone: 'America/New_York'
+        )
+
+        expect(stub).to have_been_requested
+        expect(result['timezone']).to eq('America/New_York')
+      end
+
       it 'accepts ISO 8601 datetime with timezone' do
         stub_request_with_auth(:post, '/messages/schedule',
                                response_body: scheduled_message_response)

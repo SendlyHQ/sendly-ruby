@@ -392,6 +392,10 @@ module Sendly
     # @param to [String] Recipient phone number in E.164 format
     # @param text [String] Message content (max 1600 characters)
     # @param scheduled_at [String] ISO 8601 datetime for when to send
+    # @param timezone [String] A time zone label such as "America/New_York"
+    #   (optional). It is stored with the message and returned as sent; it
+    #   does not change how +scheduled_at+ is read, so give +scheduled_at+ an
+    #   offset or +Z+. The API stores "UTC" when it is left out.
     # @param from [String] Sender ID or phone number (optional)
     # @param message_type [String] Message type: "marketing" (default) or "transactional"
     # @param metadata [Hash] Custom JSON metadata to attach to the message (max 4KB)
@@ -408,12 +412,14 @@ module Sendly
     #     scheduled_at: "2025-01-20T10:00:00Z"
     #   )
     #   puts scheduled["id"]
-    def schedule(to:, text:, scheduled_at:, from: nil, message_type: nil, metadata: nil, idempotency_key: nil)
+    def schedule(to:, text:, scheduled_at:, timezone: nil, from: nil, message_type: nil, metadata: nil,
+                 idempotency_key: nil)
       validate_phone!(to)
       validate_text!(text)
       raise ValidationError, "scheduled_at is required" if scheduled_at.nil? || scheduled_at.empty?
 
       body = { to: to, text: text, scheduledAt: scheduled_at }
+      body[:timezone] = timezone if timezone
       body[:from] = from if from
       body[:messageType] = message_type if message_type
       body[:metadata] = metadata if metadata

@@ -104,6 +104,58 @@ RSpec.describe Sendly::TemplatesResource do
     end
   end
 
+  describe '#preview' do
+    def preview_response(overrides = {})
+      {
+        'template_id' => 'tpl_preset_otp',
+        'original_text' => 'Your code is {{code}}',
+        'rendered_text' => 'Your code is 123456',
+        'character_count' => 19,
+        'segment_count' => 1
+      }.merge(overrides)
+    end
+
+    it 'posts the variables to /templates/:id/preview and returns a TemplatePreview' do
+      stub = stub_request(:post, "#{base_url}/templates/tpl_preset_otp/preview")
+        .with(
+          headers: { 'Authorization' => "Bearer #{valid_api_key}" },
+          body: { variables: { code: '123456' } }.to_json
+        )
+        .to_return(status: 200, body: preview_response.to_json,
+                   headers: { 'Content-Type' => 'application/json' })
+
+      preview = templates.preview('tpl_preset_otp', variables: { code: '123456' })
+
+      expect(stub).to have_been_requested
+      expect(preview).to be_a(Sendly::TemplatePreview)
+      expect(preview.template_id).to eq('tpl_preset_otp')
+      expect(preview.original_text).to eq('Your code is {{code}}')
+      expect(preview.rendered_text).to eq('Your code is 123456')
+      expect(preview.character_count).to eq(19)
+      expect(preview.segment_count).to eq(1)
+      expect(preview.to_h).to include(rendered_text: 'Your code is 123456', segment_count: 1)
+    end
+
+    it 'sends an empty body without variables and URL-encodes the id' do
+      stub = stub_request(:post, "#{base_url}/templates/tpl%2Fweird/preview")
+        .with(body: {}.to_json)
+        .to_return(status: 200, body: preview_response('template_id' => 'tpl/weird').to_json,
+                   headers: { 'Content-Type' => 'application/json' })
+
+      preview = templates.preview('tpl/weird')
+
+      expect(stub).to have_been_requested
+      expect(preview.template_id).to eq('tpl/weird')
+    end
+
+    it 'raises NotFoundError for an unknown template' do
+      stub_request_with_auth(:post, '/templates/tpl_missing/preview', status: 404,
+                             response_body: { 'error' => 'not_found', 'message' => 'Template not found' })
+
+      expect { templates.preview('tpl_missing') }.to raise_error(Sendly::NotFoundError)
+    end
+  end
+
   describe '#delete' do
     it 'deletes /templates/:id' do
       stub = stub_request(:delete, "#{base_url}/templates/tpl_abc123")

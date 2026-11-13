@@ -192,6 +192,17 @@ module Sendly
       @rcs ||= RcsResource.new(self)
     end
 
+    # Access the Short Codes resource (apply for a US short code and track it)
+    #
+    # @return [Sendly::ShortCodesResource]
+    #
+    # @example
+    #   view = client.short_codes.application.get
+    #   client.short_codes.application.submit(accept_terms: true)
+    def short_codes
+      @short_codes ||= ShortCodesResource.new(self)
+    end
+
     # Access the Calls resource (phone calls handled by your AI agents)
     #
     # @return [Sendly::CallsResource]

@@ -168,6 +168,26 @@ module Sendly
       @client.post("/webhooks/#{URI.encode_www_form_component(webhook_id)}/backfill", body)
     end
 
+    # Preview a recovery: count what {#redeliver} and {#backfill} would send
+    # for a window, without sending anything. The window is at most 7 days.
+    #
+    # @param webhook_id [String] Webhook ID
+    # @param since [String, nil] ISO-8601, default now − 24h
+    # @param until_ [String, nil] ISO-8601, default now
+    # @param event_types [Array<String>, nil] Event types to count, sent
+    #   comma-separated (default all)
+    # @return [Sendly::WebhookRecoveryPreview]
+    def recovery_preview(webhook_id, since: nil, until_: nil, event_types: nil)
+      validate_webhook_id!(webhook_id)
+      params = {}
+      params[:since] = since unless since.nil?
+      params[:until] = until_ unless until_.nil?
+      params[:event_types] = event_types.join(",") unless event_types.nil? || event_types.empty?
+
+      response = @client.get("/webhooks/#{URI.encode_www_form_component(webhook_id)}/recovery-preview", params)
+      WebhookRecoveryPreview.new(response)
+    end
+
     # Rotate the webhook signing secret
     #
     # Deliveries are signed with the new secret as soon as this returns, and

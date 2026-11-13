@@ -1,5 +1,25 @@
 # sendly (Ruby)
 
+## 4.7.0
+
+### Minor Changes
+
+- **`SuggestRepliesResponse` gains `disabled`, `disabled?` and `reason`.** When the workspace's enterprise account turned AI suggestions off, `conversations.suggest_replies` returns no suggestions, `disabled?` is true and `reason` is `"enterprise_policy"`. `to_h` includes both only then.
+- **`Message#batch_id`** is the batch that sent the message, read from `batchId` or `batch_id`; nil unless it is a batch message. `to_h` includes it when present.
+- **Preview a template.** `templates.preview(id, variables: { code: "123456" })` posts to `/templates/:id/preview` and returns the new `Sendly::TemplatePreview` (`template_id`, `original_text`, `rendered_text`, `character_count`, `segment_count`, and `to_h`). It renders one of your templates, or any preset, and sends nothing; without `variables`, each variable takes its fallback. An id that is neither yours nor a preset raises `Sendly::NotFoundError`.
+- **Preview a webhook recovery.** `webhooks.recovery_preview(id, since:, until_:, event_types:)` reads `GET /webhooks/:id/recovery-preview` and returns the new `Sendly::WebhookRecoveryPreview` (`circuit_state`, `circuit_opened_at`, `failure_count`, `audit_failures`, `missing_from_messages`, `histogram`, `samples`, `window_suggestion`, `since`, `until`, `circuit_open?` and `raw`): what `redeliver` and `backfill` would send for the window, without sending anything. Nested values are Hashes with symbol keys, times are `Time`, and `event_types` goes as one comma-separated value. The window is at most 7 days.
+- **Short codes.** The new `client.short_codes` resource: `list` (`GET /short_codes`) returns an Array of `Sendly::ShortCode` (`id`, `short_code`, `country_code`, `status`, `review_status`, `use_case`, `created_at`, `billing`, `active?`), and `application` has `get`, `update(**answers)` (`PUT /short_codes/application`), `check(**answers)` (`POST /short_codes/application/preflight`) and `submit(accept_terms: true, **answers)` (`POST /short_codes/application/submit`). `get`, `update` and `submit` return `Sendly::ShortCodeApplicationView` (`application` as `Sendly::ShortCodeApplication`, `documents` as `Sendly::ShortCodeDocument`, `editable?`, `lock_message`, and `prefill`, `quote`, `billing`, `verification`, `carriers` and `payment` as Hashes with snake_case Symbol keys); `check` returns `Sendly::ShortCodePreflight` (`ok?`, `issues` as `Sendly::ShortCodeIssue`, `missing_documents`). Answers take snake_case or camelCase keys. `update` and `submit` take `idempotency_key:`. Submitting charges the one-time $999 setup fee.
+- **Idempotency keys on WhatsApp signup and template create.** `whatsapp.signup.create` (both the Facebook signup and adding a number by code) and `whatsapp.templates.create` take `idempotency_key:`, sent as the `Idempotency-Key` header; a repeat with the same key within 24 hours returns the first answer instead of starting another charged signup or creating the template again. Without it the client still generates one per call, as before.
+- **`messages.schedule(timezone:)`.** Sends `timezone`, a label stored with the scheduled message and returned as sent (`"UTC"` when left out). It does not change how `scheduled_at` is read, so give `scheduled_at` an offset or `Z`.
+- **`enterprise.upload_verification_document(content_type:)`.** The API accepts only PNG, JPEG, GIF, WEBP and PDF, and reads the type from the part's content type, which the SDK takes from the file's extension. Pass `content_type:` for a file without an extension or with a different one; a blank value or one with a line break raises `ArgumentError` before anything is sent.
+- **`conversations.list(label:)`** keeps only conversations with that label id; `conversations.each(label:)` passes it on.
+- **`enterprise.workspaces.list` takes the API's filters:** `limit:` (up to 100), `page:`, `search:`, `status:`, `verification:` (`"unverified"` keeps workspaces without one), `sort:` (`"created_desc"`, `"created_asc"`, `"name_asc"`, `"name_desc"`, `"credits_desc"` or `"credits_asc"`), `compact:` and `tags:` (an Array or String, sent comma-separated). Calling it with no arguments sends the same request as before.
+
+### Patch Changes
+
+- `whatsapp.templates.update` documents how to remove parts of a template: `header: ""` or `footer: ""` removes the header or footer, and `buttons: []` removes every button. The SDK already sent these; only `nil` is left out.
+- **`Webhook#metadata` is always a Hash.** The API returns a webhook's metadata as it was stored, which can be an array, string, number or boolean; `webhooks.list` and `webhooks.get` passed such a value through, so `metadata` (and `to_h[:metadata]`) could be something other than the documented Hash. It now reads as `{}`, as `null` already did.
+
 ## 4.5.0
 
 ### Patch Changes

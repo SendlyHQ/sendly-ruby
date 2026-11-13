@@ -6,12 +6,20 @@ module Sendly
       @client = client
     end
 
-    def list(limit: 20, offset: 0, status: nil)
+    # List conversations, most recent activity first.
+    #
+    # @param limit [Integer] Page size (max 100)
+    # @param offset [Integer] How many conversations to skip
+    # @param status [String, nil] Only conversations with this status, such as "active"
+    # @param label [String, nil] Only conversations with this label id
+    # @return [ConversationList]
+    def list(limit: 20, offset: 0, status: nil, label: nil)
       params = {
         limit: [limit, 100].min,
         offset: offset
       }
       params[:status] = status if status
+      params[:label] = label if label
 
       response = @client.get("/conversations", params.compact)
       ConversationList.new(response)
@@ -127,12 +135,12 @@ module Sendly
       SuggestRepliesResponse.new(response)
     end
 
-    def each(status: nil, batch_size: 100, &block)
-      return enum_for(:each, status: status, batch_size: batch_size) unless block_given?
+    def each(status: nil, label: nil, batch_size: 100, &block)
+      return enum_for(:each, status: status, label: label, batch_size: batch_size) unless block_given?
 
       offset = 0
       loop do
-        page = list(limit: batch_size, offset: offset, status: status)
+        page = list(limit: batch_size, offset: offset, status: status, label: label)
         page.each(&block)
 
         break if !page.has_more || page.count.zero?
