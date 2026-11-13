@@ -125,11 +125,10 @@ module Sendly
   # What an agent may do on a call.
   #
   # +send_sms+ is true when the agent may text the caller; it confirms the
-  # number back to them before sending. +transfer_to+ is an E.164 number
-  # for callers who need a person, or +nil+. Agents cannot transfer calls
-  # yet and never dial or read out this number: while it is set, a caller
-  # who asks for a person is told their message will be passed on, and the
-  # agent takes their name and number.
+  # number back to them before sending. +transfer_to+ is the E.164 number
+  # the agent transfers a caller to when asked for a person, and the one
+  # {CallsResource#transfer} uses when given no number; +nil+ when the agent
+  # cannot transfer.
   class VoiceAgentTools
     attr_reader :send_sms, :transfer_to
 
@@ -148,6 +147,66 @@ module Sendly
     end
   end
 
+  # How Sendly reaches your own agent, as {VoiceAgent#connection} reports
+  # it. Which readers are set follows the agent's +kind+; the rest are +nil+.
+  #
+  # "custom_llm": +base_url+ (Sendly sends +POST {base_url}/chat/completions+
+  # with streaming on), +model+, +header_names+ (the names of the extra
+  # headers sent) and +has_api_key+.
+  #
+  # "sip": +uri+ (such as "sip:+15125550100@sip.example.com"), +transport+
+  # (one of {SIP_TRANSPORTS}), +media_encryption+ (one of
+  # {SIP_MEDIA_ENCRYPTION}), +username+ (or +nil+), +has_password+ and
+  # +headers+ (the extra X- headers sent on the call).
+  #
+  # "websocket": +url+ (your wss:// server), +audio_format+ (one of
+  # {WEBSOCKET_AUDIO_FORMATS}), +has_auth_token+ and +custom_parameters+
+  # (sent to your server in the +start+ message).
+  #
+  # Secrets (the API key, the custom_llm header values, the SIP password and
+  # the auth token) are never returned, only whether one is saved. A value
+  # this SDK predates comes through unchanged.
+  class VoiceAgentConnection
+    SIP_TRANSPORTS = %w[auto udp tcp tls].freeze
+    SIP_MEDIA_ENCRYPTION = %w[disable allow require].freeze
+    WEBSOCKET_AUDIO_FORMATS = %w[pcm16_16000 pcm16_24000 pcm16_8000 mulaw_8000].freeze
+
+    attr_reader :base_url, :model, :header_names, :has_api_key,
+                :uri, :transport, :media_encryption, :username, :has_password, :headers,
+                :url, :audio_format, :has_auth_token, :custom_parameters
+
+    # @return [Hash] The raw parsed connection
+    attr_reader :raw
+
+    def initialize(data)
+      data ||= {}
+      @raw = data
+      @base_url = data["baseUrl"] || data["base_url"]
+      @model = data["model"]
+      @header_names = data["headerNames"] || data["header_names"]
+      @has_api_key = data.key?("hasApiKey") ? data["hasApiKey"] : data["has_api_key"]
+      @uri = data["uri"]
+      @transport = data["transport"]
+      @media_encryption = data["mediaEncryption"] || data["media_encryption"]
+      @username = data["username"]
+      @has_password = data.key?("hasPassword") ? data["hasPassword"] : data["has_password"]
+      @headers = data["headers"]
+      @url = data["url"]
+      @audio_format = data["audioFormat"] || data["audio_format"]
+      @has_auth_token = data.key?("hasAuthToken") ? data["hasAuthToken"] : data["has_auth_token"]
+      @custom_parameters = data["customParameters"] || data["custom_parameters"]
+    end
+
+    def to_h
+      {
+        base_url: base_url, model: model, header_names: header_names, has_api_key: has_api_key,
+        uri: uri, transport: transport, media_encryption: media_encryption, username: username,
+        has_password: has_password, headers: headers, url: url, audio_format: audio_format,
+        has_auth_token: has_auth_token, custom_parameters: custom_parameters
+      }.compact
+    end
+  end
+
   # An AI agent that answers and places phone calls.
   #
   # +voice+ is a voice id from {VoiceVoicesResource#list} and +voice_label+
@@ -156,10 +215,27 @@ module Sendly
   # which +tools.send_sms+ needs to actually send. +calls_handled+ and
   # +avg_duration_secs+ are the agent's call stats. Timestamps are ISO 8601
   # strings.
+  #
+  # +kind+ says who answers (see {KINDS}): "sendly" writes the replies from
+  # the agent's +instructions+; "custom_llm" listens and speaks while your
+  # chat completions endpoint writes each reply; "sip" connects the caller to
+  # your SIP address; "websocket" streams the call audio to your wss://
+  # server. A kind this SDK predates comes through unchanged. +connection+
+  # is how Sendly reaches your own agent ({VoiceAgentConnection}), +nil+ for
+  # a "sendly" agent. +has_signing_secret+ is true for your own agents:
+  # Sendly signs every request to them with that secret
+  # (+X-Sendly-Signature: t=<unix>,v1=<hex HMAC-SHA256>+).
+  # +signing_secret+ is the secret itself, set only on the response that
+  # just made it (creating your own agent, switching to one, or
+  # +rotate_signing_secret: true+) and +nil+ on every other read. Save it
+  # then; it is never shown again.
   class VoiceAgent
+    KINDS = %w[sendly custom_llm sip websocket].freeze
+
     attr_reader :id, :object, :name, :enabled, :voice, :voice_label, :language,
                 :greeting, :instructions, :tools, :can_send_sms, :calls_handled,
-                :avg_duration_secs, :created_at, :updated_at
+                :avg_duration_secs, :created_at, :updated_at, :kind, :connection,
+                :has_signing_secret, :signing_secret
 
     # @return [Hash] The raw parsed response
     attr_reader :raw
@@ -176,6 +252,11 @@ module Sendly
       @language = data["language"]
       @greeting = data["greeting"]
       @instructions = data["instructions"]
+      @kind = data["kind"]
+      connection = data["connection"]
+      @connection = connection.is_a?(Hash) ? VoiceAgentConnection.new(connection) : nil
+      @has_signing_secret = data.key?("hasSigningSecret") ? data["hasSigningSecret"] : data["has_signing_secret"]
+      @signing_secret = data["signingSecret"] || data["signing_secret"]
       @tools = VoiceAgentTools.new(data["tools"])
       @can_send_sms = data.key?("canSendSms") ? data["canSendSms"] : data["can_send_sms"]
       @calls_handled = data["callsHandled"] || data["calls_handled"] || 0
@@ -195,11 +276,17 @@ module Sendly
       can_send_sms == true
     end
 
+    # @return [Boolean] Whether the agent has a signing secret
+    def has_signing_secret?
+      has_signing_secret == true
+    end
+
     def to_h
       {
         id: id, object: object, name: name, enabled: enabled, voice: voice,
         voice_label: voice_label, language: language, greeting: greeting,
-        instructions: instructions, tools: tools.to_h, can_send_sms: can_send_sms,
+        instructions: instructions, kind: kind, connection: connection&.to_h,
+        has_signing_secret: has_signing_secret, tools: tools.to_h, can_send_sms: can_send_sms,
         calls_handled: calls_handled, avg_duration_secs: avg_duration_secs,
         created_at: created_at, updated_at: updated_at
       }.compact
@@ -300,6 +387,11 @@ module Sendly
   module VoiceInput
     OMIT = Object.new.freeze
     TOOL_KEYS = { "send_sms" => "sendSms", "transfer_to" => "transferTo" }.freeze
+    CONNECTION_KEYS = {
+      "base_url" => "baseUrl", "api_key" => "apiKey", "media_encryption" => "mediaEncryption",
+      "audio_format" => "audioFormat", "auth_token" => "authToken",
+      "custom_parameters" => "customParameters"
+    }.freeze
 
     module_function
 
@@ -323,7 +415,16 @@ module Sendly
       tools.each_with_object({}) { |(key, value), out| out[TOOL_KEYS.fetch(key.to_s, key.to_s)] = value }
     end
 
-    def agent_body(name:, enabled:, voice:, language:, greeting:, instructions:, tools:)
+    def connection_body(connection)
+      return connection unless connection.is_a?(Hash)
+
+      connection.each_with_object({}) do |(key, value), out|
+        out[CONNECTION_KEYS.fetch(key.to_s, key.to_s)] = value
+      end
+    end
+
+    def agent_body(name:, enabled:, voice:, language:, greeting:, instructions:, tools:,
+                   kind: nil, connection: nil, rotate_signing_secret: nil)
       body = {}
       body[:name] = name unless name.nil?
       body[:enabled] = enabled unless enabled.nil?
@@ -332,6 +433,9 @@ module Sendly
       body[:greeting] = greeting unless greeting.nil?
       body[:instructions] = instructions unless instructions.nil?
       body[:tools] = tools_body(tools) unless tools.nil?
+      body[:kind] = kind unless kind.nil?
+      body[:connection] = connection_body(connection) unless connection.nil?
+      body[:rotateSigningSecret] = true if rotate_signing_secret == true
       body
     end
   end
@@ -534,12 +638,37 @@ module Sendly
     # @param tools [Hash, nil] +send_sms:+ and +transfer_to:+ (see
     #   {VoiceAgentTools}); camelCase keys are accepted too. +send_sms+
     #   defaults to +true+ and +transfer_to+ to +nil+.
+    # @param kind [String, nil] One of {VoiceAgent::KINDS}; the API defaults
+    #   to "sendly". Any other kind is your own agent and needs the
+    #   workspace's bring-your-own-agent feature, which support switches on.
+    # @param connection [Hash, nil] How Sendly reaches your own agent,
+    #   matching +kind+; required for every kind but "sendly". snake_case or
+    #   camelCase keys. "custom_llm": +base_url:+ (an https:// URL; Sendly
+    #   sends +POST {base_url}/chat/completions+ with streaming on), +model:+,
+    #   +api_key:+ (sent as +Authorization: Bearer+) and +headers:+ (up to 10
+    #   extra headers with secret values). "sip": +uri:+ (+sip:+ or +sips:+
+    #   with a user part and a hostname), +transport:+ (one of
+    #   {VoiceAgentConnection::SIP_TRANSPORTS}, default "tcp"),
+    #   +media_encryption:+ (one of {VoiceAgentConnection::SIP_MEDIA_ENCRYPTION},
+    #   default "allow"), +username:+, +password:+ and +headers:+ (up to 10
+    #   named +X-...+). "websocket": +url:+ (a wss:// URL), +audio_format:+ (one
+    #   of {VoiceAgentConnection::WEBSOCKET_AUDIO_FORMATS}, default
+    #   "pcm16_16000"), +auth_token:+ (sent as +Authorization: Bearer+) and
+    #   +custom_parameters:+ (up to 20 strings sent in the +start+ message).
+    #   It is sent as given: a key you leave out is not sent and +nil+ is sent
+    #   as null. Hosts must resolve to public internet addresses.
     # @param idempotency_key [String, nil] Idempotency key for this operation
-    # @return [Sendly::VoiceAgent] The new agent
+    # @return [Sendly::VoiceAgent] The new agent. For your own agent,
+    #   +signing_secret+ carries its signing secret: save it now, it is never
+    #   shown again.
     # @raise [Sendly::ValidationError] If +name+ is blank, or HTTP 400
-    #   +invalid_request+ naming the field the API rejected
+    #   +invalid_request+ naming the field the API rejected (for a
+    #   +connection+ that is missing or breaks a rule, the message reads
+    #   +connection.<field>: <reason>+)
     # @raise [Sendly::APIError] HTTP 409 +agent_limit+ when the workspace
-    #   already has 20 agents, 403 +forbidden+ / +live_key_required+
+    #   already has 20 agents, 403 +byo_agents_not_enabled+ (a +kind+ other
+    #   than "sendly" while the workspace's bring-your-own-agent feature is
+    #   off) / +forbidden+ / +live_key_required+
     #
     # @example
     #   agent = client.voice.agents.create(
@@ -550,13 +679,22 @@ module Sendly
     #     tools: { send_sms: true }
     #   )
     #   puts agent.id
+    #
+    # @example Answer with your own WebSocket server
+    #   agent = client.voice.agents.create(
+    #     name: "Support line",
+    #     kind: "websocket",
+    #     connection: { url: "wss://agent.example.com/calls", auth_token: "tok_123" }
+    #   )
+    #   secret = agent.signing_secret # shown only now
     def create(name:, enabled: nil, voice: nil, language: nil, greeting: nil, instructions: nil,
-               tools: nil, idempotency_key: nil)
+               tools: nil, kind: nil, connection: nil, idempotency_key: nil)
       VoiceInput.require_text!(name, "name is required")
 
       body = VoiceInput.agent_body(
         name: name, enabled: enabled, voice: voice, language: language,
-        greeting: greeting, instructions: instructions, tools: tools
+        greeting: greeting, instructions: instructions, tools: tools,
+        kind: kind, connection: connection
       )
       response = @client.post("/voice/agents", body, idempotency_key: idempotency_key)
       VoiceAgent.new(response)
@@ -582,6 +720,13 @@ module Sendly
     # team workspace, also a role that can manage API keys. Pass only what
     # changes; +tools+ keys you leave out keep their current values.
     #
+    # With the same +kind+, +connection+ is merged into the saved one: keys
+    # you leave out keep their values. Changing +kind+ to one of your own
+    # needs that kind's +connection+. Switching a "sendly" agent to one of
+    # your own kinds makes a signing secret, returned once in
+    # +signing_secret+; switching back to "sendly" removes the connection and
+    # the signing secret.
+    #
     # @param id [String] Agent identifier
     # @param name [String, nil] 1-80 characters
     # @param enabled [Boolean, nil] Switch the agent on or off
@@ -593,11 +738,22 @@ module Sendly
     # @param instructions [String, nil] Up to 4000 characters; +""+ clears it
     # @param tools [Hash, nil] Tool settings to change (+send_sms:+,
     #   +transfer_to:+); +transfer_to: nil+ clears the number
+    # @param kind [String, nil] One of {VoiceAgent::KINDS}
+    # @param connection [Hash, nil] Connection fields to change (see
+    #   {#create}); a secret you leave out keeps its saved value and +nil+
+    #   removes it
+    # @param rotate_signing_secret [Boolean, nil] +true+ makes a new signing
+    #   secret for your own agent, returned once in +signing_secret+ (save it
+    #   now; it is never shown again). The old secret stops working at once.
+    #   Only +true+ is sent.
     # @param idempotency_key [String, nil] Idempotency key for this operation
     # @return [Sendly::VoiceAgent] The agent after the change
     # @raise [Sendly::ValidationError] If +id+ is blank, or HTTP 400
-    #   +invalid_request+ naming the field the API rejected
+    #   +invalid_request+ naming the field the API rejected (also a
+    #   +connection+ that breaks a rule or is missing when +kind+ changes, or
+    #   +rotate_signing_secret+ on a "sendly" agent)
     # @raise [Sendly::NotFoundError] HTTP 404 +agent_not_found+
+    # @raise [Sendly::APIError] HTTP 403 +byo_agents_not_enabled+
     #
     # @example
     #   client.voice.agents.update(
@@ -605,12 +761,16 @@ module Sendly
     #     greeting: "Thanks for calling Acme. How can I help today?",
     #     tools: { send_sms: false }
     #   )
+    #
+    # @example Rotate your own agent's signing secret
+    #   secret = client.voice.agents.update(agent.id, rotate_signing_secret: true).signing_secret
     def update(id, name: nil, enabled: nil, voice: nil, language: nil, greeting: nil, instructions: nil,
-               tools: nil, idempotency_key: nil)
+               tools: nil, kind: nil, connection: nil, rotate_signing_secret: nil, idempotency_key: nil)
       path = VoiceInput.agent_path(id)
       body = VoiceInput.agent_body(
         name: name, enabled: enabled, voice: voice, language: language,
-        greeting: greeting, instructions: instructions, tools: tools
+        greeting: greeting, instructions: instructions, tools: tools,
+        kind: kind, connection: connection, rotate_signing_secret: rotate_signing_secret
       )
 
       response = @client.patch(path, body, idempotency_key: idempotency_key)
@@ -689,7 +849,8 @@ module Sendly
   # +agent_required+, +invalid_address+ (400 and 422) and
   # +e911_not_applicable+; {Sendly::APIError} with the HTTP status for
   # +agent_disabled+ / +agent_limit+ / +agent_in_use+ (409) and +forbidden+
-  # / +live_key_required+ / +insufficient_permissions+ (403); and
+  # / +live_key_required+ / +insufficient_permissions+ /
+  # +byo_agents_not_enabled+ (403); and
   # {Sendly::ServerError} (not an +APIError+) for +voice_attach_failed+ /
   # +carrier_refused+ / +voice_unavailable+ (503) and
   # +voice_internal_error+ (500). Every API error keeps the parsed body on

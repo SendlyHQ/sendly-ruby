@@ -444,6 +444,175 @@ RSpec.describe 'Voice' do
     end
   end
 
+  describe 'own agents' do
+    let(:websocket_agent_body) do
+      agent_body.merge(
+        'kind' => 'websocket',
+        'connection' => {
+          'url' => 'wss://agent.example.com/calls', 'audioFormat' => 'pcm16_16000',
+          'hasAuthToken' => true, 'customParameters' => { 'tenant' => 'acme' }
+        },
+        'hasSigningSecret' => true
+      )
+    end
+
+    it 'publishes the agent kinds and connection vocabularies' do
+      expect(Sendly::VoiceAgent::KINDS).to eq(%w[sendly custom_llm sip websocket])
+      expect(Sendly::VoiceAgentConnection::SIP_TRANSPORTS).to eq(%w[auto udp tcp tls])
+      expect(Sendly::VoiceAgentConnection::SIP_MEDIA_ENCRYPTION).to eq(%w[disable allow require])
+      expect(Sendly::VoiceAgentConnection::WEBSOCKET_AUDIO_FORMATS)
+        .to eq(%w[pcm16_16000 pcm16_24000 pcm16_8000 mulaw_8000])
+      expect(Sendly::Call::ERROR_CODES).to include('byo_agents_not_enabled')
+    end
+
+    it 'reads a sendly agent with no connection and no signing secret' do
+      stub_request_with_auth(:get, "/voice/agents/#{agent_id}", response_body: agent_body.merge(
+        'kind' => 'sendly', 'connection' => nil, 'hasSigningSecret' => false
+      ))
+
+      agent = voice.agents.get(agent_id)
+
+      expect(agent.kind).to eq('sendly')
+      expect(agent.connection).to be_nil
+      expect(agent.has_signing_secret?).to be false
+      expect(agent.signing_secret).to be_nil
+      expect(agent.to_h).to include(kind: 'sendly', has_signing_secret: false)
+      expect(agent.to_h).not_to have_key(:connection)
+    end
+
+    it 'POSTs kind and a camelCased connection and reads the one-time signing secret' do
+      seen = capture(:post, '/voice/agents', json(201, websocket_agent_body.merge('signingSecret' => 'whsec_once')))
+
+      agent = voice.agents.create(
+        name: 'Support line', kind: 'websocket',
+        connection: {
+          url: 'wss://agent.example.com/calls', audio_format: 'pcm16_16000', auth_token: 'tok_123',
+          custom_parameters: { 'tenant_id' => 'acme' }
+        }
+      )
+
+      expect(JSON.parse(seen[0].body)).to eq(
+        'name' => 'Support line', 'kind' => 'websocket',
+        'connection' => {
+          'url' => 'wss://agent.example.com/calls', 'audioFormat' => 'pcm16_16000',
+          'authToken' => 'tok_123', 'customParameters' => { 'tenant_id' => 'acme' }
+        }
+      )
+      expect(seen[0].headers['Idempotency-Key']).to match(auto_key_pattern)
+      expect(agent.kind).to eq('websocket')
+      expect(agent.connection).to be_a(Sendly::VoiceAgentConnection)
+      expect(agent.connection.url).to eq('wss://agent.example.com/calls')
+      expect(agent.connection.audio_format).to eq('pcm16_16000')
+      expect(agent.connection.has_auth_token).to be true
+      expect(agent.connection.custom_parameters).to eq('tenant' => 'acme')
+      expect(agent.connection.base_url).to be_nil
+      expect(agent.has_signing_secret?).to be true
+      expect(agent.signing_secret).to eq('whsec_once')
+      expect(agent.to_h[:connection]).to eq(
+        url: 'wss://agent.example.com/calls', audio_format: 'pcm16_16000', has_auth_token: true,
+        custom_parameters: { 'tenant' => 'acme' }
+      )
+    end
+
+    it 'reads custom_llm and sip connections' do
+      llm = Sendly::VoiceAgent.new(agent_body.merge(
+        'kind' => 'custom_llm',
+        'connection' => {
+          'baseUrl' => 'https://llm.example.com/v1', 'model' => 'support-v2',
+          'headerNames' => ['X-Tenant'], 'hasApiKey' => true
+        }
+      ))
+      sip = Sendly::VoiceAgent.new(agent_body.merge(
+        'kind' => 'sip',
+        'connection' => {
+          'uri' => 'sip:+15125550100@sip.example.com', 'transport' => 'tls', 'mediaEncryption' => 'require',
+          'username' => nil, 'hasPassword' => false, 'headers' => { 'X-Account' => '42' }
+        }
+      ))
+
+      expect(llm.connection.base_url).to eq('https://llm.example.com/v1')
+      expect(llm.connection.model).to eq('support-v2')
+      expect(llm.connection.header_names).to eq(['X-Tenant'])
+      expect(llm.connection.has_api_key).to be true
+      expect(sip.connection.uri).to eq('sip:+15125550100@sip.example.com')
+      expect(sip.connection.transport).to eq('tls')
+      expect(sip.connection.media_encryption).to eq('require')
+      expect(sip.connection.username).to be_nil
+      expect(sip.connection.has_password).to be false
+      expect(sip.connection.headers).to eq('X-Account' => '42')
+    end
+
+    it 'passes an unknown kind through unchanged' do
+      agent = Sendly::VoiceAgent.new(agent_body.merge('kind' => 'future_kind'))
+
+      expect(agent.kind).to eq('future_kind')
+    end
+
+    it 'PATCHes a partial connection as given, keeping nil to remove a secret' do
+      seen = capture(:patch, "/voice/agents/#{agent_id}", json(200, websocket_agent_body))
+
+      voice.agents.update(agent_id, connection: { 'authToken' => nil, url: 'wss://agent.example.com/v2' })
+      voice.agents.update(agent_id, connection: { custom_parameters: nil })
+
+      expect(JSON.parse(seen[0].body)).to eq(
+        'connection' => { 'authToken' => nil, 'url' => 'wss://agent.example.com/v2' }
+      )
+      expect(JSON.parse(seen[1].body)).to eq('connection' => { 'customParameters' => nil })
+    end
+
+    it 'sends rotateSigningSecret only as true and reads the new secret' do
+      seen = capture(:patch, "/voice/agents/#{agent_id}",
+                     json(200, websocket_agent_body.merge('signingSecret' => 'whsec_rotated')))
+
+      agent = voice.agents.update(agent_id, rotate_signing_secret: true, idempotency_key: 'rotate-1')
+      voice.agents.update(agent_id, name: 'Reception', rotate_signing_secret: false)
+
+      expect(JSON.parse(seen[0].body)).to eq('rotateSigningSecret' => true)
+      expect(seen[0].headers['Idempotency-Key']).to eq('rotate-1')
+      expect(agent.signing_secret).to eq('whsec_rotated')
+      expect(JSON.parse(seen[1].body)).to eq('name' => 'Reception')
+    end
+
+    it 'switches kind with a connection, and back to sendly with kind alone' do
+      seen = capture(:patch, "/voice/agents/#{agent_id}", json(200, agent_body))
+
+      voice.agents.update(
+        agent_id, kind: 'sip',
+        connection: { uri: 'sip:+15125550100@sip.example.com', media_encryption: 'allow', password: 'hunter2' }
+      )
+      voice.agents.update(agent_id, kind: 'sendly')
+
+      expect(JSON.parse(seen[0].body)).to eq(
+        'kind' => 'sip',
+        'connection' => {
+          'uri' => 'sip:+15125550100@sip.example.com', 'mediaEncryption' => 'allow', 'password' => 'hunter2'
+        }
+      )
+      expect(JSON.parse(seen[1].body)).to eq('kind' => 'sendly')
+    end
+
+    it 'raises APIError with status 403 on byo_agents_not_enabled' do
+      stub_request(:post, "#{base_url}/voice/agents")
+        .to_return(json(403, 'error' => 'byo_agents_not_enabled',
+                             'message' => 'Your own agents are not switched on for this workspace.'))
+
+      expect do
+        voice.agents.create(name: 'Support line', kind: 'websocket', connection: { url: 'wss://agent.example.com' })
+      end.to raise_error(Sendly::APIError) { |e|
+        expect(e.status_code).to eq(403)
+        expect(e.code).to eq('byo_agents_not_enabled')
+      }
+    end
+
+    it 'raises ValidationError naming the connection field on 400 invalid_request' do
+      stub_request(:patch, "#{base_url}/voice/agents/#{agent_id}")
+        .to_return(json(400, 'error' => 'invalid_request', 'message' => 'connection.url: must start with wss://'))
+
+      expect { voice.agents.update(agent_id, connection: { url: 'ws://agent.example.com' }) }
+        .to raise_error(Sendly::ValidationError, /connection\.url/)
+    end
+  end
+
   describe 'voices' do
     it 'GETs /voice/voices and unwraps data into Voices' do
       stub_request_with_auth(:get, '/voice/voices', response_body: {

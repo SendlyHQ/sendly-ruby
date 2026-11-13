@@ -1660,7 +1660,7 @@ client.messages.send(
 ## Voice Calls
 
 Place phone calls that one of your AI agents handles, list and inspect
-calls, end a call early, and download recordings. Agents are created with
+calls, transfer a caller, end a call early, and download recordings. Agents are created with
 `client.voice.agents` or in the dashboard under Calls, then Agents; the
 number you call from must have voice switched on and an emergency address
 registered before it can place outbound calls (see
@@ -1676,8 +1676,8 @@ from = client.numbers.list[:numbers].find(&:voice_enabled?)&.phone_number
 Calls are prepaid from your credit balance per started minute: 2 credits a
 minute outbound, plus 8 a minute while an AI agent is on the call (10 in
 total for an API-placed call). Unanswered calls cost nothing. Destinations
-are US and Canadian numbers. Reads need the `calls:read` scope; `create`
-and `hangup` need `calls:write` and a live key.
+are US and Canadian numbers. Reads need the `calls:read` scope; `create`,
+`transfer` and `hangup` need `calls:write` and a live key.
 
 > **Rolling out.** Voice is enabled workspace by workspace. Until it is on
 > for yours, every `client.calls` and `client.voice` method raises
@@ -1710,6 +1710,15 @@ page.each { |c| puts "#{c.to} #{c.duration_secs}s #{c.credits_charged} credits" 
 puts page.total
 puts page.has_more?
 
+# Only calls answered by one kind of agent (Sendly::Call::AGENT_KINDS)
+client.calls.list(agent_kind: "websocket")
+
+# Transfer the caller on an incoming phone call. Without `to:`, the agent's
+# transfer number (tools.transfer_to) is used.
+incoming = client.calls.list(direction: "inbound", status: "active").first
+incoming = client.calls.transfer(incoming.id, to: "+15125550142")
+puts incoming.transfer.status # "pending", then "completed" or "failed"
+
 # End a call. Ringing -> "cancelled", active -> "completed"; a call that
 # has already ended comes back unchanged.
 client.calls.hangup(call.id)
@@ -1736,8 +1745,25 @@ number), 409 for `agent_disabled`, `no_voice_number` and `lines_busy` (retry
 shortly), or 403 for `live_key_required` and a key missing the scope; and
 `Sendly::ServerError` (a sibling of `APIError`, not a subclass) for 503
 `voice_unavailable` / `agents_unavailable` and 500 `voice_internal_error`.
-The full list is `Sendly::Call::ERROR_CODES`; the hangup vocabulary is
+`create` also answers 409 `agent_kind_unsupported` when the agent's `kind`
+is `"sip"` or `"websocket"`, which answer incoming calls only. The full list
+is `Sendly::Call::ERROR_CODES`; the hangup vocabulary is
 `Sendly::Call::HANGUP_CLASSES`.
+
+Each call carries `agent_kind` (the kind of agent that answered, or nil),
+`agent_fallback?` (true when your own agent could not be reached, so Sendly
+said a short line and transferred the caller or took a message) and
+`transfer` (nil, or a `Sendly::CallTransfer` with `to`, `status` and
+`failure_reason`). A transfer answers at once with `transfer.status`
+`"pending"`; once the caller is handed over the call ends `"completed"` with
+`hangup_class` `"transferred"`, and a failed transfer leaves the caller on
+the call. Transfer refusals: `Sendly::ValidationError` for
+`invalid_request` and `transfer_to_required` (no `to:` and the agent has no
+transfer number), `Sendly::InsufficientCreditsError` when no credits are
+left, and `Sendly::APIError` with `status_code` 403 for
+`outbound_not_enabled` (a number other than the agent's needs calling out
+switched on) or 409 for `call_not_active`, `call_not_transferable` (not an
+incoming phone call) and `transfer_in_progress`.
 
 `call.channel` is where the call took place: `"phone"`, `"whatsapp"` (a
 WhatsApp call, for example one placed from the dashboard) or `"browser"`
@@ -1830,6 +1856,45 @@ couldn't be found for emergency registration, retrying won't help, so
 contact support. When it says the address couldn't be registered or
 emergency calling couldn't be switched on, try again later. Every API error
 keeps the parsed body on `e.response_body`.
+
+### Bring your own agent
+
+An agent's `kind` says who writes the replies: `"sendly"` (the default,
+from the agent's `instructions`), `"custom_llm"` (Sendly listens and speaks,
+and your chat completions endpoint writes each reply), `"sip"` (Sendly
+connects the caller to your SIP address) or `"websocket"` (Sendly streams
+the call audio to your `wss://` server). Your own agents need the
+workspace's bring-your-own-agent feature, which support switches on
+(`Sendly::APIError` 403 `byo_agents_not_enabled` otherwise).
+
+```ruby
+agent = client.voice.agents.create(
+  name: "Support line",
+  kind: "websocket",
+  connection: { url: "wss://agent.example.com/calls", auth_token: "tok_123" }
+)
+secret = agent.signing_secret # save it now; it is never shown again
+puts agent.connection.url, agent.connection.has_auth_token, agent.has_signing_secret?
+
+# Same kind: the connection is merged, so only what you pass changes
+client.voice.agents.update(agent.id, connection: { custom_parameters: { "tenant" => "acme" } })
+
+# A new signing secret; the old one stops working at once
+secret = client.voice.agents.update(agent.id, rotate_signing_secret: true).signing_secret
+```
+
+`connection:` takes snake_case or camelCase keys: `base_url`, `model`,
+`api_key` and `headers` for `"custom_llm"`; `uri`, `transport`,
+`media_encryption`, `username`, `password` and `headers` for `"sip"`; `url`,
+`audio_format`, `auth_token` and `custom_parameters` for `"websocket"`. A
+secret you leave out keeps its saved value and `nil` removes it. Secrets are
+never returned: `agent.connection` (a `Sendly::VoiceAgentConnection`) reports
+`has_api_key`, `has_password` or `has_auth_token` instead. Sendly signs every
+request to your agent with the signing secret
+(`X-Sendly-Signature: t=<unix>,v1=<hex HMAC-SHA256>`); `signing_secret` is
+set only on the create or update response that made it. A connection that
+breaks a rule raises `Sendly::ValidationError` with a message like
+`connection.url: <reason>`.
 
 ## Error Handling
 

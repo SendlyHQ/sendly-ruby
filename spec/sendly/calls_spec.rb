@@ -49,6 +49,14 @@ RSpec.describe 'Calls' do
     expect(Sendly::Call::HANGUP_CLASSES).to include('normal', 'ring_timeout', 'credits_exhausted',
                                                     'setup_failed', 'ended')
     expect(Sendly::Call::HANGUP_CLASSES).to include('transferred', 'voicemail', 'voicemail_unavailable')
+    expect(Sendly::Call::HANGUP_CLASSES).to include('agent_remote_hangup', 'agent_byo_failed')
+    expect(Sendly::Call::AGENT_KINDS).to eq(%w[sendly custom_llm sip websocket])
+    expect(Sendly::Call::ERROR_CODES).to include(
+      'agent_kind_unsupported', 'transfer_to_required', 'outbound_not_enabled', 'call_not_active',
+      'call_not_transferable', 'transfer_in_progress'
+    )
+    expect(Sendly::CallTransfer::STATUSES).to eq(%w[pending completed failed])
+    expect(Sendly::CallTransfer::FAILURE_REASONS).to eq(%w[busy no_answer declined unavailable unknown])
     expect(Sendly::Call::ERROR_CODES).to include('voice_unavailable', 'agents_unavailable')
     expect(Sendly::Call::ERROR_CODES).to include('voice_not_enabled', 'agent_required', 'e911_required',
                                                  'lines_busy', 'call_not_found', 'live_key_required')
@@ -385,6 +393,151 @@ RSpec.describe 'Calls' do
                              'message' => 'No call with that id is in this workspace.'))
 
       expect { calls.hangup(call_id) }.to raise_error(Sendly::NotFoundError)
+    end
+  end
+
+  describe 'agent kind, fallback and transfer fields' do
+    it 'reads agentKind, agentFallback and a failed transfer' do
+      stub_request_with_auth(:get, "/calls/#{call_id}", response_body: completed_body.merge(
+        'direction' => 'inbound', 'hangupClass' => 'agent_byo_failed', 'agentKind' => 'websocket',
+        'agentFallback' => true,
+        'transfer' => { 'to' => '+15555550142', 'status' => 'failed', 'failureReason' => 'busy' }
+      ))
+
+      call = calls.get(call_id)
+
+      expect(call.agent_kind).to eq('websocket')
+      expect(call.agent_fallback).to be true
+      expect(call.agent_fallback?).to be true
+      expect(call.hangup_class).to eq('agent_byo_failed')
+      expect(call.transfer).to be_a(Sendly::CallTransfer)
+      expect(call.transfer.to).to eq('+15555550142')
+      expect(call.transfer.status).to eq('failed')
+      expect(call.transfer.failed?).to be true
+      expect(call.transfer.failure_reason).to eq('busy')
+      expect(call.to_h).to include(
+        agent_kind: 'websocket', agent_fallback: true,
+        transfer: { to: '+15555550142', status: 'failed', failure_reason: 'busy' }
+      )
+    end
+
+    it 'leaves transfer nil when the call was never transferred, and reads older calls' do
+      current = Sendly::Call.new(call_body.merge('agentKind' => 'sendly', 'agentFallback' => false, 'transfer' => nil))
+      older = Sendly::Call.new(call_body)
+
+      expect(current.agent_kind).to eq('sendly')
+      expect(current.agent_fallback?).to be false
+      expect(current.transfer).to be_nil
+      expect(current.to_h).not_to have_key(:transfer)
+      expect(older.agent_kind).to be_nil
+      expect(older.agent_fallback?).to be false
+      expect(older.transfer).to be_nil
+    end
+
+    it 'reads the snake_case twin the webhooks carry and keeps unknown values' do
+      call = Sendly::Call.new(call_body.merge(
+        'agent_kind' => 'future_kind', 'agent_fallback' => false,
+        'transfer' => { 'to' => '+15555550142', 'status' => 'queued', 'failure_reason' => nil }
+      ))
+
+      expect(call.agent_kind).to eq('future_kind')
+      expect(call.agent_fallback).to be false
+      expect(call.transfer.status).to eq('queued')
+      expect(call.transfer.pending?).to be false
+      expect(call.transfer.failure_reason).to be_nil
+    end
+
+    it 'filters the list by agentKind' do
+      stub = stub_request(:get, "#{base_url}/calls")
+        .with(query: { 'agentKind' => 'custom_llm', 'agentId' => agent_id })
+        .to_return(json(200, 'data' => [], 'pagination' => { 'total' => 0, 'limit' => 50, 'offset' => 0,
+                                                             'hasMore' => false }))
+
+      calls.list(agent_kind: 'custom_llm', agent_id: agent_id)
+
+      expect(stub).to have_been_requested
+    end
+  end
+
+  describe 'transfer' do
+    let(:pending_body) do
+      call_body.merge(
+        'direction' => 'inbound', 'status' => 'active', 'agentKind' => 'websocket', 'agentFallback' => false,
+        'transfer' => { 'to' => '+15555550142', 'status' => 'pending', 'failureReason' => nil }
+      )
+    end
+
+    it 'POSTs /calls/:id/transfer with to and an auto Idempotency-Key and maps the 202' do
+      keys = []
+      stub = stub_request(:post, "#{base_url}/calls/#{call_id}/transfer")
+        .with(body: { to: '+15555550142' }.to_json) { |req| keys << req.headers['Idempotency-Key'] }
+        .to_return(json(202, pending_body))
+
+      call = calls.transfer(call_id, to: '+15555550142')
+
+      expect(stub).to have_been_requested
+      expect(keys[0]).to match(auto_key_pattern)
+      expect(call).to be_a(Sendly::Call)
+      expect(call.transfer.status).to eq('pending')
+      expect(call.transfer.pending?).to be true
+      expect(call.transfer.to).to eq('+15555550142')
+      expect(call.transfer.failure_reason).to be_nil
+    end
+
+    it 'sends an empty body without to, and a caller key verbatim' do
+      stub = stub_request(:post, "#{base_url}/calls/#{call_id}/transfer")
+        .with(body: '{}', headers: { 'Idempotency-Key' => 'transfer-1' })
+        .to_return(json(202, pending_body))
+
+      calls.transfer(call_id, idempotency_key: 'transfer-1')
+
+      expect(stub).to have_been_requested
+    end
+
+    it 'percent-encodes the id and raises ValidationError when it is blank' do
+      stub = stub_request(:post, "#{base_url}/calls/call%2Fwith+space/transfer").to_return(json(202, pending_body))
+
+      calls.transfer('call/with space')
+
+      expect(stub).to have_been_requested
+      expect { calls.transfer('') }.to raise_error(Sendly::ValidationError, 'Call ID is required')
+      expect { calls.transfer(nil, to: '+15555550142') }.to raise_error(Sendly::ValidationError, 'Call ID is required')
+    end
+
+    it 'raises ValidationError on 400 transfer_to_required' do
+      stub_request(:post, "#{base_url}/calls/#{call_id}/transfer")
+        .to_return(json(400, 'error' => 'transfer_to_required', 'message' => 'The agent has no transfer number.'))
+
+      expect { calls.transfer(call_id) }.to raise_error(Sendly::ValidationError) { |e|
+        expect(e.code).to eq('transfer_to_required')
+      }
+    end
+
+    it 'raises InsufficientCreditsError on 402' do
+      stub_request(:post, "#{base_url}/calls/#{call_id}/transfer")
+        .to_return(json(402, 'error' => 'insufficient_credits', 'message' => 'No credits left.', 'creditsNeeded' => 1))
+
+      expect { calls.transfer(call_id, to: '+15555550142') }.to raise_error(Sendly::InsufficientCreditsError)
+    end
+
+    it 'raises APIError with the status on 403 outbound_not_enabled and 409 refusals' do
+      [[403, 'outbound_not_enabled'], [409, 'call_not_active'], [409, 'call_not_transferable'],
+       [409, 'transfer_in_progress']].each do |status, code|
+        stub_request(:post, "#{base_url}/calls/#{call_id}/transfer")
+          .to_return(json(status, 'error' => code, 'message' => "Refused: #{code}."))
+
+        expect { calls.transfer(call_id, to: '+15555550142') }.to raise_error(Sendly::APIError) { |e|
+          expect(e.status_code).to eq(status)
+          expect(e.code).to eq(code)
+        }
+      end
+    end
+
+    it 'raises NotFoundError on 404 call_not_found' do
+      stub_request(:post, "#{base_url}/calls/#{call_id}/transfer")
+        .to_return(json(404, 'error' => 'call_not_found', 'message' => 'No call with that id is in this workspace.'))
+
+      expect { calls.transfer(call_id) }.to raise_error(Sendly::NotFoundError)
     end
   end
 

@@ -20,6 +20,43 @@ module Sendly
     end
   end
 
+  # The latest transfer on a call. +to+ is the E.164 number the caller is
+  # transferred to. +status+ is "pending" while that number rings,
+  # "completed" once the caller was handed over and "failed" when the
+  # transfer did not go through and the caller is still on the call (see
+  # {STATUSES}). +failure_reason+ is +nil+ unless +status+ is "failed", then
+  # one of {FAILURE_REASONS} ("unknown" when no definite answer came back).
+  # A value this SDK predates comes through unchanged.
+  class CallTransfer
+    STATUSES = %w[pending completed failed].freeze
+    FAILURE_REASONS = %w[busy no_answer declined unavailable unknown].freeze
+
+    attr_reader :to, :status, :failure_reason
+
+    def initialize(data)
+      data ||= {}
+      @to = data["to"]
+      @status = data["status"]
+      @failure_reason = data["failureReason"] || data["failure_reason"]
+    end
+
+    def pending?
+      status == "pending"
+    end
+
+    def completed?
+      status == "completed"
+    end
+
+    def failed?
+      status == "failed"
+    end
+
+    def to_h
+      { to: to, status: status, failure_reason: failure_reason }.compact
+    end
+  end
+
   # A phone call placed or received by one of your workspace's numbers.
   #
   # +kind+ is "pstn" for a phone call and "internal" for a browser-to-browser
@@ -37,9 +74,15 @@ module Sendly
   # phone call is charged per started minute, "settled" once it has ended,
   # and "unbilled" for calls that are never charged. +hangup_class+ says why
   # the call ended (see {HANGUP_CLASSES}); anything unrecognised arrives as
-  # "ended". +metadata+ is the string map attached on create (+{}+ when
-  # none). +transcript+ is only present on {CallsResource#get} for
-  # agent-handled calls and is +nil+ otherwise.
+  # "ended". +agent_kind+ is the kind of agent that answered ("sendly",
+  # "custom_llm", "sip" or "websocket", see {AGENT_KINDS}), or +nil+ when no
+  # agent handled the call. +agent_fallback+ is true when your own agent
+  # could not be reached (or dropped), so Sendly said a short line and
+  # transferred the caller or took a message. +transfer+ is the latest
+  # {CallTransfer}, or +nil+ when the call was never transferred.
+  # +metadata+ is the string map attached on create (+{}+ when none).
+  # +transcript+ is only present on {CallsResource#get} for agent-handled
+  # calls and is +nil+ otherwise.
   class Call
     STATUSES = %w[ringing active completed no_answer busy cancelled declined failed suspended].freeze
     LIVE_STATUSES = %w[ringing active].freeze
@@ -49,6 +92,7 @@ module Sendly
     HANDLED_BY = %w[agent dashboard].freeze
     BILLING_STATES = %w[metered settled unbilled].freeze
     RECORDING_STATUSES = %w[recording ready failed].freeze
+    AGENT_KINDS = %w[sendly custom_llm sip websocket].freeze
     HANGUP_CLASSES = %w[
       normal caller_hung_up callee_hung_up caller_left peer_left agent_ended
       agent_agent_hangup agent_caller_left
@@ -57,6 +101,7 @@ module Sendly
       max_duration credits_exhausted media_aborted peer_connection_lost room_closed agent_left
       transferred voicemail voicemail_unavailable
       setup_failed agent_dispatch_failed agent_api_unreachable agent_already_ended
+      agent_remote_hangup agent_byo_failed
       ended
     ].freeze
     ERROR_CODES = %w[
@@ -67,13 +112,16 @@ module Sendly
       insufficient_credits invalid_number rate_limit_exceeded forbidden
       invalid_request insufficient_permissions agent_in_use agent_limit invalid_voice_mode
       invalid_address e911_not_applicable voice_attach_failed carrier_refused
-      from_number_not_supported
+      from_number_not_supported byo_agents_not_enabled agent_kind_unsupported
+      transfer_to_required outbound_not_enabled call_not_active call_not_transferable
+      transfer_in_progress
     ].freeze
 
     attr_reader :id, :object, :kind, :direction, :status, :handled_by, :agent_id,
                 :from, :to, :caller_name, :callee_name, :started_at, :answered_at,
                 :ended_at, :duration_secs, :credits_charged, :billing, :hangup_class,
-                :recording_status, :metadata, :transcript, :channel
+                :recording_status, :metadata, :transcript, :channel, :agent_kind,
+                :agent_fallback, :transfer
 
     # @return [Hash] The raw parsed response
     attr_reader :raw
@@ -101,6 +149,10 @@ module Sendly
       @billing = data["billing"]
       @hangup_class = data["hangupClass"] || data["hangup_class"]
       @recording_status = data["recordingStatus"] || data["recording_status"]
+      @agent_kind = data["agentKind"] || data["agent_kind"]
+      @agent_fallback = data.key?("agentFallback") ? data["agentFallback"] : data["agent_fallback"]
+      transfer = data["transfer"]
+      @transfer = transfer.is_a?(Hash) ? CallTransfer.new(transfer) : nil
       @metadata = data["metadata"] || {}
       lines = data["transcript"]
       @transcript = lines.is_a?(Array) ? lines.map { |l| CallTranscriptLine.new(l) } : nil
@@ -132,6 +184,12 @@ module Sendly
       direction == "outbound"
     end
 
+    # @return [Boolean] Whether your own agent could not be reached, so
+    #   Sendly said a short line and transferred the caller or took a message
+    def agent_fallback?
+      agent_fallback == true
+    end
+
     def to_h
       {
         id: id, object: object, kind: kind, channel: channel, direction: direction, status: status,
@@ -139,7 +197,8 @@ module Sendly
         caller_name: caller_name, callee_name: callee_name, started_at: started_at,
         answered_at: answered_at, ended_at: ended_at, duration_secs: duration_secs,
         credits_charged: credits_charged, billing: billing, hangup_class: hangup_class,
-        recording_status: recording_status, metadata: metadata,
+        recording_status: recording_status, agent_kind: agent_kind,
+        agent_fallback: agent_fallback, transfer: transfer&.to_h, metadata: metadata,
         transcript: transcript&.map(&:to_h)
       }.compact
     end
@@ -222,7 +281,7 @@ module Sendly
   end
 
   # Calls resource: place phone calls handled by your AI agents, list and
-  # inspect calls, end a call and fetch recordings.
+  # inspect calls, transfer a caller, end a call and fetch recordings.
   #
   # A call placed over the API is answered by one of your AI agents
   # (create them with {VoiceAgentsResource#create} or in the dashboard
@@ -240,12 +299,14 @@ module Sendly
   # +voice_not_enabled+, +outbound_calls_not_enabled+, +agent_not_found+,
   # +number_not_found+ and +call_not_found+; {Sendly::ValidationError} for
   # +invalid_number+, +destination_not_supported+, +agent_required+,
-  # +invalid_metadata+, +from_number_required+ and
-  # +from_number_not_supported+; {Sendly::InsufficientCreditsError} for
+  # +invalid_metadata+, +from_number_required+, +from_number_not_supported+
+  # and +transfer_to_required+; {Sendly::InsufficientCreditsError} for
   # +insufficient_credits+; {Sendly::RateLimitError} for +daily_call_limit+ and
   # +rate_limit_exceeded+; {Sendly::APIError} with the HTTP status for
   # +e911_required+ (428), +agent_disabled+ / +no_voice_number+ /
-  # +lines_busy+ (409) and +live_key_required+ / +forbidden+ (403); and
+  # +lines_busy+ / +agent_kind_unsupported+ / +call_not_active+ /
+  # +call_not_transferable+ / +transfer_in_progress+ (409) and
+  # +live_key_required+ / +forbidden+ / +outbound_not_enabled+ (403); and
   # {Sendly::ServerError} (not an +APIError+) for +voice_unavailable+ /
   # +agents_unavailable+ (503) and +voice_internal_error+ (500). The full
   # list is {Call::ERROR_CODES}.
@@ -295,7 +356,9 @@ module Sendly
     # @raise [Sendly::APIError] HTTP 428 +e911_required+ (register an
     #   emergency address for the number first with
     #   {VoiceNumbersResource#register_emergency_address}), 409 +agent_disabled+ /
-    #   +no_voice_number+ / +lines_busy+, 403 +live_key_required+
+    #   +no_voice_number+ / +lines_busy+ / +agent_kind_unsupported+ (the
+    #   agent's +kind+ is "sip" or "websocket", which answer incoming calls
+    #   only; "custom_llm" agents can place calls), 403 +live_key_required+
     # @raise [Sendly::RateLimitError] HTTP 429 +daily_call_limit+ / +rate_limit_exceeded+
     # @raise [Sendly::ServerError] HTTP 503 +voice_unavailable+ /
     #   +agents_unavailable+ (calling is not switched on for this deployment),
@@ -332,6 +395,9 @@ module Sendly
     # @param direction [String, nil] "inbound" or "outbound"
     # @param kind [String, nil] "pstn" or "internal"
     # @param agent_id [String, nil] Only calls handled by this agent
+    # @param agent_kind [String, nil] Only calls answered by this kind of
+    #   agent, one of {Call::AGENT_KINDS}. Calls from before agent kinds
+    #   existed count as "sendly".
     # @param to [String, nil] Exact E.164 match on the called number
     # @param from [String, nil] Exact E.164 match on the calling number
     # @return [Sendly::CallList] The page and its pagination
@@ -343,7 +409,7 @@ module Sendly
     #   page.each { |c| puts "#{c.to} #{c.duration_secs}s #{c.credits_charged} credits" }
     #   puts page.has_more?
     def list(limit: nil, offset: nil, status: nil, direction: nil, kind: nil,
-             agent_id: nil, to: nil, from: nil)
+             agent_id: nil, agent_kind: nil, to: nil, from: nil)
       params = {}
       params[:limit] = limit unless limit.nil?
       params[:offset] = offset unless offset.nil?
@@ -351,6 +417,7 @@ module Sendly
       params[:direction] = direction unless direction.nil?
       params[:kind] = kind unless kind.nil?
       params[:agentId] = agent_id unless agent_id.nil?
+      params[:agentKind] = agent_kind unless agent_kind.nil?
       params[:to] = to unless to.nil?
       params[:from] = from unless from.nil?
 
@@ -392,6 +459,49 @@ module Sendly
     def hangup(id, idempotency_key: nil)
       encoded_id = encode_id!(id)
       response = @client.post("/calls/#{encoded_id}/hangup", {}, idempotency_key: idempotency_key)
+      Call.new(response)
+    end
+
+    # Transfer the caller on an incoming phone call to another number,
+    # whatever kind of agent is on the call. Returns at once with
+    # +transfer.status+ "pending"; the outcome shows on {#get}
+    # (+transfer.status+) and, once the caller is handed over, the call ends
+    # +completed+ with +hangup_class+ "transferred" (also in the
+    # +call.completed+ webhook). A failed transfer leaves the caller on the
+    # call. Requires the +calls:write+ scope and a live key.
+    #
+    # @param id [String] Call identifier
+    # @param to [String, nil] The number to transfer the caller to, in E.164
+    #   format: US or Canadian, not premium-rate, not the number the caller
+    #   dialled and not a number the agent answers. Left out (not sent), the
+    #   agent's transfer number (+tools.transfer_to+) is used. Any other
+    #   number needs calling out switched on for the workspace.
+    # @param idempotency_key [String, nil] Idempotency key for this operation
+    # @return [Sendly::Call] The call, with +transfer.status+ "pending"
+    # @raise [Sendly::ValidationError] If +id+ is missing, or HTTP 400
+    #   +invalid_request+ (+to+ is malformed, outside the US and Canada,
+    #   premium-rate, the dialled number or a number the agent answers) or
+    #   +transfer_to_required+ (no +to+ and the agent has no transfer number)
+    # @raise [Sendly::InsufficientCreditsError] HTTP 402 when the workspace
+    #   has no credits left
+    # @raise [Sendly::NotFoundError] HTTP 404 +call_not_found+
+    # @raise [Sendly::APIError] HTTP 403 +outbound_not_enabled+ (+to+ is not
+    #   the agent's transfer number and calling out is not switched on), 409
+    #   +call_not_active+ (the call is not in progress) /
+    #   +call_not_transferable+ (not an incoming phone call) /
+    #   +transfer_in_progress+ (a transfer is already under way, or the call
+    #   has had 3 transfer attempts)
+    # @raise [Sendly::ServerError] HTTP 500 +voice_internal_error+
+    #
+    # @example
+    #   call = client.calls.transfer(call.id, to: "+15555550142")
+    #   puts call.transfer.status # "pending"
+    def transfer(id, to: nil, idempotency_key: nil)
+      encoded_id = encode_id!(id)
+      body = {}
+      body[:to] = to unless to.nil?
+
+      response = @client.post("/calls/#{encoded_id}/transfer", body, idempotency_key: idempotency_key)
       Call.new(response)
     end
 
